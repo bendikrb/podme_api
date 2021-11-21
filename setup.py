@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="podme_api-bendikrb",
-    version="0.0.1",
+    version="0.0.2",
     description="A client library for using the podme.com web API.",
     long_description=long_description,
     long_description_content_type="text/markdown",
