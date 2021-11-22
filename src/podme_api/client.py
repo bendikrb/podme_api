@@ -8,7 +8,6 @@ import urllib
 import urllib.parse
 
 import requests
-import simplejson
 from youtube_dl import YoutubeDL
 from youtube_dl.utils import YoutubeDLError
 from .const import *
@@ -135,7 +134,7 @@ class PodMeClient:
                 new_results = response
                 data.extend(response)
                 page += 1
-            except (simplejson.JSONDecodeError, json.JSONDecodeError):
+            except json.JSONDecodeError:
                 new_results = []
 
         return data
