@@ -1,4 +1,4 @@
-""" Init file for podme_api """
+"""Init file for podme_api."""
 
 import pkg_resources  # part of setuptools
 

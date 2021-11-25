@@ -1,0 +1,6 @@
+""" """
+
+
+class AccessDeniedError(Exception):
+    """ """
+    pass

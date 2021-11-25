@@ -8,9 +8,12 @@ import urllib
 import urllib.parse
 
 import requests
+from typing import Callable, Dict, List
+from .types import PodMeEpisode, PodMeEpisodeExcerpt, PodMePodcast, PodMeSearchResult, PodMeSubscription
 from youtube_dl import YoutubeDL
 from youtube_dl.utils import YoutubeDLError
 from .const import *
+from .exceptions import AccessDeniedError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,6 +88,9 @@ class PodMeClient:
         fragment = urllib.parse.urlparse(redirect.url).fragment
         token = urllib.parse.parse_qs(fragment)
 
+        if 'error' in token:
+            raise AccessDeniedError(token)
+
         self._oauth_token = token.get('access_token')[0]
         self._id_token = token.get('id_token')[0]
         expiration_time = int(token.get('expires_in')[0])
@@ -144,7 +150,7 @@ class PodMeClient:
         if d['status'] == 'finished':
             _LOGGER.info('Done downloading, now converting ...')
 
-    def download_episode(self, path, url, on_finished: callable = None):
+    def download_episode(self, path, url, on_finished: Callable[[Dict], None] = None):
         def _progress_hook(d):
             self._download_episode_hook(d)
             if on_finished is not None:
@@ -163,14 +169,22 @@ class PodMeClient:
                 _LOGGER.fatal(f"youtube-dl failed to harvest from {url} to {path}")
                 return False
 
-    def get_user_podcasts(self) -> list[dict]:
+    def get_user_subscription(self) -> PodMeSubscription:
+        subscription = requests.get(
+            PODME_API_URL.format(endpoint="subscription"),
+            headers=self.request_header,
+        ).json()
+        
+        return subscription
+
+    def get_user_podcasts(self) -> List[PodMeEpisodeExcerpt]:
         podcasts = self._get_pages(
             PODME_API_URL.format(endpoint="/podcast/userpodcasts"),
         )
 
         return podcasts
 
-    def get_popular_podcasts(self) -> list[dict]:
+    def get_popular_podcasts(self) -> List[PodMeEpisodeExcerpt]:
         podcasts = self._get_pages(
             PODME_API_URL.format(endpoint="/podcast/popular"),
             params={
@@ -181,7 +195,7 @@ class PodMeClient:
 
         return podcasts
 
-    def get_podcast_info(self, podcast_slug: str) -> dict:
+    def get_podcast_info(self, podcast_slug: str) -> PodMePodcast:
         data = requests.get(
             PODME_API_URL.format(endpoint=f"/podcast/slug/{podcast_slug}"),
             headers=self.request_header,
@@ -189,7 +203,7 @@ class PodMeClient:
 
         return data
 
-    def get_episode_info(self, episode_id: int) -> dict:
+    def get_episode_info(self, episode_id: int) -> PodMeEpisode:
         data = requests.get(
             PODME_API_URL.format(endpoint=f"/episode/{episode_id}"),
             headers=self.request_header,
@@ -197,7 +211,7 @@ class PodMeClient:
 
         return data
 
-    def search_podcast(self, search: str) -> list[dict]:
+    def search_podcast(self, search: str) -> List[PodMeSearchResult]:
         podcasts = requests.get(
             PODME_API_URL.format(endpoint="/podcast/search"), params={
                 "searchText": search,
@@ -206,7 +220,7 @@ class PodMeClient:
         ).json()
         return podcasts
 
-    def get_episode_list(self, podcast_slug: str) -> list[dict]:
+    def get_episode_list(self, podcast_slug: str) -> List[PodMeEpisodeExcerpt]:
         episodes = self._get_pages(
             PODME_API_URL.format(endpoint=f"/episode/slug/{podcast_slug}"),
             get_by_oldest=True,
@@ -215,6 +229,6 @@ class PodMeClient:
 
         return episodes
 
-    def scrape_episode_ids(self, slug) -> list[str]:
+    def get_episode_ids(self, slug) -> List[int]:
         episodes = self.get_episode_list(slug)
-        return [str(e['id']) for e in episodes]
+        return [int(e['id']) for e in episodes]
