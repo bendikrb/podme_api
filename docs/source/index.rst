@@ -1,7 +1,8 @@
 .. include:: ../../README.md
 
-.. toctree::
+`. toctree::
    :caption: Readme
+   :name: readme
 
    readme
 
