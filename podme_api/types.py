@@ -1,6 +1,7 @@
 """"""
+from typing import Union
 
-from .utils import SerializableBaseClass
+from podme_api.utils import SerializableBaseClass
 
 
 class PodMeCategory(SerializableBaseClass):
@@ -18,8 +19,8 @@ class PodMePodcast(SerializableBaseClass):
     smallImageUrl: str
     mediumImageUrl: str
     authorFullName: str
-    hasBookmark: any[None, bool]
-    hasSubscription: any[None, bool]
+    hasBookmark: Union[None, bool]
+    hasSubscription: Union[None, bool]
     categories: list[PodMeCategory]
     subscriptionType: int
     slug: str
@@ -55,7 +56,7 @@ class PodMeEpisode(PodMeEpisodeExcerpt):
     authorFullName: str
     podcastTitle: str
     imageUrl: str
-    streamUrl: any[None, str]
+    streamUrl: Union[None, str]
     slug: str
 
 
@@ -69,8 +70,8 @@ class PodMeSubscriptionPlan(SerializableBaseClass):
 
 
 class PodMeSubscription(SerializableBaseClass):
-    podcastId: any[None, int]
-    podcastTitle: any[None, str]
+    podcastId: Union[None, int]
+    podcastTitle: Union[None, str]
     subscriptionState: int
     subscriptionType: int
     subscriptionPlatform: int
@@ -78,5 +79,4 @@ class PodMeSubscription(SerializableBaseClass):
     startDate: str
     imageUrl: str
     willBeRenewed: bool
-    subscriptionPlan: any[None, PodMeSubscriptionPlan]
-
+    subscriptionPlan: Union[None, PodMeSubscriptionPlan]

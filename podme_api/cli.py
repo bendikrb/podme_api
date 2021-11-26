@@ -1,8 +1,8 @@
-import logging
 import argparse
 import json
+import logging
 
-from .client import PodMeClient
+from podme_api.client import PodMeClient
 
 
 def main_parser() -> argparse.ArgumentParser:
@@ -22,7 +22,7 @@ def main_parser() -> argparse.ArgumentParser:
 def get_subscription(args) -> None:
     """Retrieve PodMe subscription."""
     client = PodMeClient(args.username, args.password)
-    
+
     subscription = client.get_user_subscription()
 
     print(json.dumps(subscription, indent=4))

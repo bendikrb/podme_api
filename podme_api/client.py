@@ -6,14 +6,15 @@ import math
 import re
 import urllib
 import urllib.parse
+from typing import Callable, Dict, List
 
 import requests
-from typing import Callable, Dict, List
-from .types import PodMeEpisode, PodMeEpisodeExcerpt, PodMePodcast, PodMeSearchResult, PodMeSubscription
 from youtube_dl import YoutubeDL
 from youtube_dl.utils import YoutubeDLError
-from .const import *
-from .exceptions import AccessDeniedError
+
+from podme_api.const import *
+from podme_api.exceptions import AccessDeniedError
+from podme_api.types import PodMeEpisode, PodMeEpisodeExcerpt, PodMePodcast, PodMeSearchResult, PodMeSubscription
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ class PodMeClient:
             PODME_API_URL.format(endpoint="subscription"),
             headers=self.request_header,
         ).json()
-        
+
         return subscription
 
     def get_user_podcasts(self) -> List[PodMeEpisodeExcerpt]:
