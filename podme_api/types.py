@@ -1,5 +1,5 @@
 """"""
-from typing import Union
+from typing import Union, List
 
 from podme_api.utils import SerializableBaseClass
 
@@ -21,7 +21,7 @@ class PodMePodcast(SerializableBaseClass):
     authorFullName: str
     hasBookmark: Union[None, bool]
     hasSubscription: Union[None, bool]
-    categories: list[PodMeCategory]
+    categories: List[PodMeCategory]
     subscriptionType: int
     slug: str
 

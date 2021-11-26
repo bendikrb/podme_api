@@ -105,7 +105,7 @@ class PodMeClient:
         )
 
     @property
-    def request_header(self) -> dict[str, str]:
+    def request_header(self) -> Dict[str, str]:
         """Generate a header for HTTP requests to the server."""
         self._get_oauth_token()
         headers = {

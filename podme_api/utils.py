@@ -3,11 +3,12 @@
 import inspect
 import json
 from abc import ABC
+from typing import Dict
 
 
 def serialize_for_json(
         obj: object, excluded: list = None, exclude_hidden: bool = True
-) -> dict:
+) -> Dict:
     """
     Returns all object attributes and properties as dictionary.
     :param excluded list: attributes and parameters NOT to export
