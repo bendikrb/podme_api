@@ -85,7 +85,6 @@ class PodMeClient:
                 **{
                     "csrf_token": auth_settings.get('csrf'),
                 }))
-        redirect.raise_for_status()
         fragment = urllib.parse.urlparse(redirect.url).fragment
         token = urllib.parse.parse_qs(fragment)
 
