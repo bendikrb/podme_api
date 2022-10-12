@@ -11,6 +11,7 @@ from typing import Callable, Dict, List
 import requests
 from youtube_dl import YoutubeDL
 from youtube_dl.utils import YoutubeDLError
+import uuid
 
 from podme_api.const import *
 from podme_api.exceptions import AccessDeniedError
@@ -232,3 +233,73 @@ class PodMeClient:
     def get_episode_ids(self, slug) -> List[int]:
         episodes = self.get_episode_list(slug)
         return [int(e['id']) for e in episodes]
+
+
+class PodMeSchibstedClient(PodMeClient):
+
+    _supported_regions = ['NO']
+
+    def __init__(self, email: str, password: str, language: str = "no", region: str = "NO"):
+        super().__init__(email, password, language, region)
+        if region not in self._supported_regions:
+            raise AssertionError(f"Region '{region}' is currently not supported by {self.__class__.__name__}. "
+                                 f"Supported regions are {self._supported_regions}.")
+
+    def _get_oauth_token(self) -> None:
+        """Get a new auth token from the server (with Schibsted SSO)."""
+
+        if self._token_expiration is not None and datetime.datetime.now() < self._token_expiration:
+            _LOGGER.debug('Old token is still valid. Not getting a new one.')
+            return
+
+        # Interacting with the Schibsted auth flow to gather required cookies to request the JWT token
+        oauth_session = requests.Session()
+
+        _LOGGER.debug("Initializing Schibsted auth flow...")
+        init_auth_res = oauth_session.get(self._build_schibsted_auth_url())
+        init_auth_res.raise_for_status()
+
+        _LOGGER.debug("Retrieving CSRF token...")
+        csrf_res = oauth_session.get(PODME_SCHIBSTED_AUTH_CSRF_URL)
+        csrf_res.raise_for_status()
+        csrf_token = json.loads(csrf_res.text)['data']['attributes']['csrfToken']
+
+        _LOGGER.debug("Submitting credentials...")
+        auth_login_res = oauth_session.post(
+            PODME_SCHIBSTED_AUTH_LOGIN_URL,
+            data={"username": self._email, "password": self._password},
+            headers={"x-csrf-token": csrf_token}
+        )
+        auth_login_res.raise_for_status()
+
+        _LOGGER.debug("Finalizing auth flow...")
+        auth_finish_res = oauth_session.post(PODME_SCHIBSTED_AUTH_FINISH_URL, headers={"x-csrf-token": csrf_token})
+        auth_finish_res.raise_for_status()
+        jwt_creds = json.loads(urllib.parse.unquote(oauth_session.cookies.get("jwt-cred")))
+
+        self._oauth_token = jwt_creds['access_token']
+        self._refresh_token = jwt_creds['refresh_token']
+        self._token_expiration = datetime.datetime.fromtimestamp(jwt_creds['expiration_time'])
+        self._id_token = jwt_creds['id_token']
+
+        _LOGGER.debug(
+            "got new token %s with expiration date %s",
+            self._oauth_token,
+            self._token_expiration,
+        )
+
+    @staticmethod
+    def _build_schibsted_auth_url():
+        auth_state = urllib.parse.quote(
+            json.dumps({
+                "returnUrl": PODME_SCHIBSTED_AUTH_RETURN_URL,
+                "uuid": str(uuid.uuid4())}
+            ).replace("'", '"').replace(" ", ""),
+            safe=""
+        )
+        return f"{PODME_SCHIBSTED_AUTH_URL_BASE}?" \
+               f"client_id={PODME_SCHIBSTED_AUTH_CLIENT_ID}&" \
+               f"redirect_uri={urllib.parse.quote(PODME_SCHIBSTED_AUTH_REDIRECT)}&" \
+               f"response_type={PODME_SCHIBSTED_AUTH_RESPONSE_TYPE}&" \
+               f"scope={PODME_SCHIBSTED_AUTH_SCOPE}&" \
+               f"state={auth_state}"
