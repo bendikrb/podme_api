@@ -1,3 +1,0 @@
-requests
-youtube-dl
-urllib3

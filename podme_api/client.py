@@ -6,7 +6,9 @@ import math
 import re
 import urllib
 import urllib.parse
-from typing import Callable, Dict, List
+import pathlib
+import platformdirs
+from typing import Callable
 
 import requests
 from youtube_dl import YoutubeDL
@@ -14,8 +16,15 @@ from youtube_dl.utils import YoutubeDLError
 import uuid
 
 from podme_api.const import *
-from podme_api.exceptions import AccessDeniedError
-from podme_api.types import PodMeEpisode, PodMeEpisodeExcerpt, PodMePodcast, PodMeSearchResult, PodMeSubscription
+from podme_api.exceptions import AuthorizationError, AuthorizationSignInError
+from podme_api.models import (
+    PodMeCredentials,
+    PodMeEpisode,
+    PodMeEpisodeExcerpt,
+    PodMePodcast,
+    PodMeSearchResult,
+    PodMeSubscription,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,18 +35,33 @@ class PodMeClient:
         self._password = password
         self._language = language
         self._region = region
-        self._oauth_token = None
-        self._refresh_token = None
-        self._token_expiration = None
-        self._id_token = None
+        self._credentials: PodMeCredentials | None = None
+        # self._oauth_token = None
+        # self._refresh_token = None
+        # self._token_expiration = None
+        # self._id_token = None
+        self._conf_dir = platformdirs.user_config_dir('podme_api', ensure_exists=True)
 
     def login(self):
         self._get_oauth_token()
+        if self._credentials:
+            self.save_credentials()
+
+    def save_credentials(self):
+        filename = pathlib.Path(self._conf_dir, 'credentials.json').resolve()
+        with open(filename, 'w') as f:
+            f.write(self._credentials.model_dump_json())
+
+    def load_credentials(self, filename = None):
+        filename = filename or pathlib.Path(self._conf_dir, 'credentials.json').resolve()
+        with open(filename, 'r') as f:
+            data = json.loads(f.read())
+            self._credentials = PodMeCredentials(**data)
 
     def _get_oauth_token(self) -> None:
         """Get a new auth token from the server."""
 
-        if self._token_expiration is not None and datetime.datetime.now() < self._token_expiration:
+        if self._credentials is not None and not self._credentials.is_expired:
             _LOGGER.debug('Old token is still valid. Not getting a new one.')
             return
 
@@ -78,6 +102,9 @@ class PodMeClient:
             }
         )
         authorization.raise_for_status()
+        auth_result = authorization.json()
+        if auth_result['status'] != '200':
+            raise AuthorizationSignInError(auth_result['status'], auth_result['message'])
 
         redirect = oauth_session.get(
             f'{PODME_AUTH_TOKEN_URL}/api/CombinedSigninAndSignup/confirmed',
@@ -86,33 +113,31 @@ class PodMeClient:
                 **{
                     "csrf_token": auth_settings.get('csrf'),
                 }))
-        fragment = urllib.parse.urlparse(redirect.url).fragment
-        token = urllib.parse.parse_qs(fragment)
+        response_json = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(redirect.url).fragment))
 
-        if 'error' in token:
-            raise AccessDeniedError(token)
+        if 'error' in response_json:
+            raise AuthorizationError(response_json)
 
-        self._oauth_token = token.get('access_token')[0]
-        self._id_token = token.get('id_token')[0]
-        expiration_time = int(token.get('expires_in')[0])
-        self._token_expiration = datetime.datetime.now() + datetime.timedelta(
-            seconds=expiration_time
-        )
-        _LOGGER.debug(
-            "got new token %s with expiration date %s",
-            self._oauth_token,
-            self._token_expiration,
-        )
+        self._credentials = PodMeCredentials(**response_json)
+        # self._oauth_token = response_json['access_token']
+        # self._id_token = response_json['id_token']
+        # expiration_time = int(response_json['expires_in'])
+        # self._token_expiration = datetime.datetime.now() + datetime.timedelta(
+        #     seconds=expiration_time
+        # )
 
     @property
-    def request_header(self) -> Dict[str, str]:
+    def request_header(self) -> dict[str, str]:
         """Generate a header for HTTP requests to the server."""
+        had_creds = self._credentials is not None
         self._get_oauth_token()
         headers = {
             "Accept": "application/json",
-            "Authorization": "Bearer {}".format(self._oauth_token),
+            "Authorization": self._credentials.auth_header(),
             "X-Region": self._region,
         }
+        if self._credentials and not had_creds:
+            self.save_credentials()
         return headers
 
     def _get_pages(self, url, get_by_oldest=False, get_pages=None, page_size=None, params=None):
@@ -137,11 +162,12 @@ class PodMeClient:
                         },
                         **params,
                     }, headers=self.request_header
-                ).json()
-                new_results = response
-                data.extend(response)
+                )
+                response.raise_for_status()
+                new_results = response.json()
+                data.extend(new_results)
                 page += 1
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as ex:
                 new_results = []
 
         return data
@@ -151,7 +177,7 @@ class PodMeClient:
         if d['status'] == 'finished':
             _LOGGER.info('Done downloading, now converting ...')
 
-    def download_episode(self, path, url, on_finished: Callable[[Dict], None] = None):
+    def download_episode(self, path, url, on_finished: Callable[[dict], None] = None):
         def _progress_hook(d):
             self._download_episode_hook(d)
             if on_finished is not None:
@@ -170,31 +196,56 @@ class PodMeClient:
                 _LOGGER.fatal(f"youtube-dl failed to harvest from {url} to {path}")
                 return False
 
-    def get_user_subscription(self) -> PodMeSubscription:
-        subscription = requests.get(
-            PODME_API_URL.format(endpoint="subscription"),
+    def get_user_subscription(self) -> list[PodMeSubscription]:
+        subscriptions = requests.get(
+            PODME_API_URL.format(endpoint="/subscription"),
             headers=self.request_header,
-        ).json()
+        )
+        subscriptions.raise_for_status()
+        if subscriptions.status_code == 204:
+            return []
 
-        return subscription
+        return [PodMeSubscription(**data) for data in subscriptions.json()]
 
-    def get_user_podcasts(self) -> List[PodMeEpisodeExcerpt]:
+    def get_user_podcasts(self) -> list[PodMePodcast]:
         podcasts = self._get_pages(
             PODME_API_URL.format(endpoint="/podcast/userpodcasts"),
         )
 
-        return podcasts
+        return [PodMePodcast(**data) for data in podcasts]
 
-    def get_popular_podcasts(self) -> List[PodMeEpisodeExcerpt]:
+    def get_popular_podcasts(self, podcast_type: int = None, category: str = None,
+                             pages: int = None, page_size: int = None) -> list[PodMePodcast]:
+        if podcast_type is None:
+            podcast_type = 2
+        if category is None:
+            category = ""
+
         podcasts = self._get_pages(
             PODME_API_URL.format(endpoint="/podcast/popular"),
             params={
-                "podcastType": 2,
-                "category": "",
-            }
+                "podcastType": podcast_type,
+                "category": category,
+            },
+            get_pages=pages,
+            page_size=page_size,
         )
 
-        return podcasts
+        return [PodMePodcast(**data) for data in podcasts]
+
+    def subscribe_to_podcast(self, podcast_id: int) -> bool:
+        res = requests.post(
+            PODME_API_URL.format(endpoint=f"/bookmark/{podcast_id}"),
+            headers=self.request_header,
+        )
+        return res.status_code == 201
+
+    def unsubscribe_to_podcast(self, podcast_id: int) -> bool:
+        res = requests.delete(
+            PODME_API_URL.format(endpoint=f"/bookmark/{podcast_id}"),
+            headers=self.request_header,
+        )
+        return res.status_code == 200
 
     def get_podcast_info(self, podcast_slug: str) -> PodMePodcast:
         data = requests.get(
@@ -202,7 +253,7 @@ class PodMeClient:
             headers=self.request_header,
         ).json()
 
-        return data
+        return PodMePodcast(**data)
 
     def get_episode_info(self, episode_id: int) -> PodMeEpisode:
         data = requests.get(
@@ -210,27 +261,28 @@ class PodMeClient:
             headers=self.request_header,
         ).json()
 
-        return data
+        return PodMeEpisode(**data)
 
-    def search_podcast(self, search: str) -> List[PodMeSearchResult]:
+    def search_podcast(self, search: str) -> list[PodMeSearchResult]:
         podcasts = requests.get(
             PODME_API_URL.format(endpoint="/podcast/search"), params={
                 "searchText": search,
             },
             headers=self.request_header,
         ).json()
-        return podcasts
 
-    def get_episode_list(self, podcast_slug: str) -> List[PodMeEpisodeExcerpt]:
+        return [PodMeSearchResult(**data) for data in podcasts]
+
+    def get_episode_list(self, podcast_slug: str) -> list[PodMeEpisodeExcerpt]:
         episodes = self._get_pages(
             PODME_API_URL.format(endpoint=f"/episode/slug/{podcast_slug}"),
             get_by_oldest=True,
         )
         _LOGGER.debug("Retrieved full episode list, containing %s episodes", len(episodes))
 
-        return episodes
+        return [PodMeEpisodeExcerpt(**data) for data in episodes]
 
-    def get_episode_ids(self, slug) -> List[int]:
+    def get_episode_ids(self, slug) -> list[int]:
         episodes = self.get_episode_list(slug)
         return [int(e['id']) for e in episodes]
 
@@ -248,7 +300,7 @@ class PodMeSchibstedClient(PodMeClient):
     def _get_oauth_token(self) -> None:
         """Get a new auth token from the server (with Schibsted SSO)."""
 
-        if self._token_expiration is not None and datetime.datetime.now() < self._token_expiration:
+        if self._credentials is not None and not self._credentials.is_expired:
             _LOGGER.debug('Old token is still valid. Not getting a new one.')
             return
 
@@ -277,16 +329,11 @@ class PodMeSchibstedClient(PodMeClient):
         auth_finish_res.raise_for_status()
         jwt_creds = json.loads(urllib.parse.unquote(oauth_session.cookies.get("jwt-cred")))
 
-        self._oauth_token = jwt_creds['access_token']
-        self._refresh_token = jwt_creds['refresh_token']
-        self._token_expiration = datetime.datetime.fromtimestamp(jwt_creds['expiration_time'])
-        self._id_token = jwt_creds['id_token']
-
-        _LOGGER.debug(
-            "got new token %s with expiration date %s",
-            self._oauth_token,
-            self._token_expiration,
-        )
+        self._credentials = PodMeCredentials(**jwt_creds)
+        # self._oauth_token = jwt_creds['access_token']
+        # self._refresh_token = jwt_creds['refresh_token']
+        # self._token_expiration = datetime.datetime.fromtimestamp(jwt_creds['expiration_time'])
+        # self._id_token = jwt_creds['id_token']
 
     @staticmethod
     def _build_schibsted_auth_url():

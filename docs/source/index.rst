@@ -1,6 +1,6 @@
-.. include:: ../../README.md
+.. include:: ../../README.rst
 
-`. toctree::
+.. toctree::
    :caption: Readme
    :name: readme
 
@@ -18,11 +18,9 @@
 
 .. toctree::
    :caption: Module documentation
-   :name: module
-   :maxdepth: 2
-   :glob:
 
-   api/*
+   apidoc
+
 
 
 Indices and tables
