@@ -84,9 +84,6 @@ class PodMePodcastBase(DataClassORJSONMixin):
     id: int
     title: str
     is_premium: bool = field(metadata=field_options(alias="isPremium"))
-    small_image_url: str = field(metadata=field_options(alias="smallImageUrl"))
-    medium_image_url: str = field(metadata=field_options(alias="mediumImageUrl"))
-    large_image_url: str = field(metadata=field_options(alias="largeImageUrl"))
     slug: str
 
 
