@@ -1,18 +1,21 @@
-""" """
+"""podme_api exceptions."""
 
 
-class AuthorizationSignInError(Exception):
-    """ """
-    def __init__(self, err_no, err_msg):
-        self.err_no = err_no
-        self.err_msg = err_msg
+class PodMeApiError(Exception):
+    """Generic PodMe exception."""
 
 
-class AuthorizationError(Exception):
-    """ """
-    pass
+class PodMeApiConnectionError(PodMeApiError):
+    """PodMe connection exception."""
 
 
-class AccessDeniedError(Exception):
-    """ """
-    pass
+class PodMeApiConnectionTimeoutError(PodMeApiConnectionError):
+    """PodMe connection timeout exception."""
+
+
+class PodMeApiRateLimitError(PodMeApiConnectionError):
+    """PodMe Rate Limit exception."""
+
+
+class PodMeApiAuthenticationError(PodMeApiError):
+    """PodMe authentication exception."""

@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "podme-api"
-version = "0.2.0"
+version = "0.0.0"
 description = "A client library for using the podme.com web API"
-readme = "README.rst"
+readme = "README.md"
 authors = ["Bendik R. Brenne <bendik@konstant.no>"]
 repository = "https://github.com/bendikrb/podme_api"
 documentation = "https://podme-api.readthedocs.io/en/latest/"
@@ -11,9 +11,8 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 keywords = [
     "podcast",
@@ -25,15 +24,20 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.12"
 youtube-dl = "^2021.12.17"
-requests = "^2.31.0"
-pydantic = "^2.4.2"
-rich = "^13.6.0"
-platformdirs = "^3.11.0"
+rich = "^13.9.2"
+platformdirs = "^4.3.6"
 pathlib = "^1.0.1"
+aiohttp = "^3.10.9"
+aiofiles = "^24.1.0"
+async-timeout = "^4.0.3"
+mashumaro = "^3.13.1"
+orjson = "^3.10.7"
 
 [tool.poetry.group.dev.dependencies]
+pylint = "3.0.2"
+ruff = "0.1.3"
 sphinx = "^7.2.6"
 sphinx-autobuild = "^2021.3.14"
 sphinx-rtd-theme = "^1.3.0"
@@ -45,6 +49,59 @@ docs = ["sphinx", "sphinx-autobuild", "sphinx-rtd-theme", "sphinx-argparse"]
 
 [tool.poetry.scripts]
 podme = "podme_api.cli:main"
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+ignore = [
+    "ARG001",
+    "A003", "ANN001", "ANN003", "ANN101", "ANN102", "ANN201", "ANN202", "ANN204", "ANN205", "ANN401",
+    "COM812", "COM819",
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D202", "D203", "D205", "D206", "D213",
+    "E501", "EM101", "EM102",
+    "ERA001",
+    "FBT001", "FBT002", "FBT003",
+    "FIX002",
+    "G004",
+    "ISC001",
+    "PLR0913",
+    "PTH123",
+    "Q000", "Q001", "Q002", "Q003",
+    "RUF012",
+    "S101",
+    "SLOT000",
+    "TD003", "TID252", "TRY003", "TRY300",
+    "W191",
+]
+select = ["ALL"]
+
+[tool.pylint."MESSAGES CONTROL"]
+disable = [
+    "format",
+    "duplicate-code",
+    "used-before-assignment",
+    "too-many-arguments",
+    "too-many-instance-attributes",
+    "too-few-public-methods",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "missing-module-docstring",
+]
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = false
+mark-parentheses = false
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+combine-as-imports = true
+known-first-party = ["podme_api"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = [
+    "mashumaro.mixins.orjson.DataClassORJSONMixin",
+]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
