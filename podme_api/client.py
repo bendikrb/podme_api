@@ -97,7 +97,7 @@ class PodMeClient:
         **kwargs,
     ) -> str | dict | list | None:
         """Make a request."""
-        url = URL(f"{PODME_API_URL.strip("/")}/").join(URL(uri))
+        url = URL(f"{PODME_API_URL.strip('/')}/").join(URL(uri))
 
         access_token = await self.auth_client.async_get_access_token()
         headers = {

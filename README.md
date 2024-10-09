@@ -35,7 +35,7 @@ If you have any questions or need assistance with the library, you can contact t
 [license-shield]: https://img.shields.io/github/license/bendikrb/podme_api.svg
 [license]: https://github.com/bendikrb/podme-api/blob/main/LICENSE
 [releases-shield]: https://img.shields.io/pypi/v/podme-api
-[releases]: https://github.com/bendikrb/podme-api/releases
+[releases]: https://github.com/bendikrb/podme_api/releases
 [build-shield]: https://github.com/bendikrb/podme-api/actions/workflows/test.yaml/badge.svg
 [build]: https://github.com/bendikrb/podme-api/actions/workflows/test.yaml
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2024.svg

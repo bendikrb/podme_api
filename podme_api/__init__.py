@@ -1,5 +1,5 @@
 """Init file for podme_api."""
-from podme_api.auth import PodMeDefaultAuthClient
+from podme_api.auth import PodMeDefaultAuthClient, PodMeUserCredentials
 from podme_api.client import (
     PodMeClient,
 )
@@ -25,4 +25,5 @@ __all__ = [
     "PodMeRegion",
     "PodMeSearchResult",
     "PodMeSubscription",
+    "PodMeUserCredentials",
 ]
