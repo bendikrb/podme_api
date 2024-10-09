@@ -329,7 +329,7 @@ class PodMeClient:
             f"episode/{episode_id}",
         )
 
-        return PodMeEpisode.from_json(data)
+        return PodMeEpisode.from_dict(data)
 
     async def search_podcast(
         self,
