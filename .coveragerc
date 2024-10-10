@@ -1,0 +1,13 @@
+[run]
+branch = True
+omit =
+    podme_api/cli.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    def __str__
+    def __rich_console__
+    if __name__ == .__main__.:
+    if TYPE_CHECKING

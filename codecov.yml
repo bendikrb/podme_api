@@ -1,0 +1,6 @@
+codecov:
+  branch: master
+cli:
+  plugins:
+    pycoverage:
+      report_type: "json"
