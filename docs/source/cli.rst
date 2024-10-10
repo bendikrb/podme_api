@@ -1,9 +1,17 @@
-.. _cli_module:
+CLI Usage
+=========
 
-:mod:`podme_api`
-======================
+The ``podme-api`` library includes a command-line interface (CLI) script to interact with the API. Below are examples of how to use the CLI script.
 
-.. argparse::
-   :module: podme_api.cli
-   :func: main_parser
-   :prog: podme_api
+
+Favourite podcasts
+------------------
+
+Get a list of your favourite (subscribed) podcasts:
+
+.. code-block:: bash
+
+    poetry run podme favourites
+
+
+(TBD)

@@ -1,27 +1,24 @@
-.. include:: ../../README.rst
+podme-api
+=========
 
 .. toctree::
-   :caption: Readme
-   :name: readme
-
-   readme
-
-
-.. toctree::
-   :caption: CLI documentation
-   :name: cli
    :maxdepth: 2
-   :glob:
+   :caption: GET STARTED:
+
+   installation
+   introduction
+
+.. toctree::
+   :maxdepth: 2
+   :caption: COMMAND LINE:
 
    cli
 
-
 .. toctree::
-   :caption: Module documentation
+   :maxdepth: 4
+   :caption: API:
 
-   apidoc
-
-
+   reference
 
 Indices and tables
 ==================
