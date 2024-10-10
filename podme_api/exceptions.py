@@ -5,6 +5,10 @@ class PodMeApiError(Exception):
     """Generic PodMe exception."""
 
 
+class PodMeApiNotFoundError(PodMeApiError):
+    """PodMe not found exception."""
+
+
 class PodMeApiConnectionError(PodMeApiError):
     """PodMe connection exception."""
 

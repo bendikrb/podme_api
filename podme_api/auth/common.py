@@ -1,4 +1,5 @@
 """Abstract class to make authenticated requests."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

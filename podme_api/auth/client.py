@@ -11,7 +11,6 @@ from urllib.parse import unquote
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from aiohttp.hdrs import METH_GET, METH_POST
-import async_timeout
 from yarl import URL
 
 from podme_api.auth.common import PodMeAuthClient
@@ -109,7 +108,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         )
 
         try:
-            async with async_timeout.timeout(self.request_timeout):
+            async with asyncio.timeout(self.request_timeout):
                 response = await self.session.request(
                     method,
                     url,

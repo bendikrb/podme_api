@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from mashumaro import field_options
-from mashumaro.mixins.orjson import DataClassORJSONMixin
+
+from podme_api.models import BaseDataClassORJSONMixin
 
 
 @dataclass
@@ -14,7 +15,7 @@ class PodMeUserCredentials:
 
 
 @dataclass
-class SchibstedCredentials(DataClassORJSONMixin):
+class SchibstedCredentials(BaseDataClassORJSONMixin):
     scope: str
     user_id: str
     is_admin: bool
@@ -43,7 +44,7 @@ class SchibstedCredentials(DataClassORJSONMixin):
 
 
 @dataclass
-class SchibstedAuthClientData(DataClassORJSONMixin):
+class SchibstedAuthClientData(BaseDataClassORJSONMixin):
     app_type: str = field(metadata=field_options(alias="appType"))
     birthday_format: str = field(metadata=field_options(alias="birthdayFormat"))
     company: str
@@ -68,7 +69,7 @@ class SchibstedAuthClientData(DataClassORJSONMixin):
 
 
 @dataclass
-class PodMeBffData(DataClassORJSONMixin):
+class PodMeBffData(BaseDataClassORJSONMixin):
     bff: dict
     client: SchibstedAuthClientData
     csrf_token: str = field(metadata=field_options(alias="csrfToken"))

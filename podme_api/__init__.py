@@ -1,4 +1,5 @@
 """Init file for podme_api."""
+
 from podme_api.auth import PodMeDefaultAuthClient, PodMeUserCredentials
 from podme_api.client import (
     PodMeClient,
@@ -6,7 +7,8 @@ from podme_api.client import (
 from podme_api.models import (
     PodMeCategory,
     PodMeEpisode,
-    PodMeEpisodeExcerpt,
+    PodMeHomeSectionEpisode,
+    PodMeHomeSectionPodcast,
     PodMePodcast,
     PodMePodcastBase,
     PodMeRegion,
@@ -19,7 +21,8 @@ __all__ = [
     "PodMeClient",
     "PodMeDefaultAuthClient",
     "PodMeEpisode",
-    "PodMeEpisodeExcerpt",
+    "PodMeHomeSectionEpisode",
+    "PodMeHomeSectionPodcast",
     "PodMePodcast",
     "PodMePodcastBase",
     "PodMeRegion",
