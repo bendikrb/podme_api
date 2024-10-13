@@ -50,22 +50,27 @@ class PodMeAuthClient(ABC):
 
     @abstractmethod
     def get_credentials(self) -> dict | None:
-        """Retrieve the current user credentials.
+        """Retrieve the current credentials.
 
         Returns:
-            dict | None: A dictionary containing user credentials, or None if not set.
+            dict | None: A dictionary containing credentials, or None if not set.
 
         """
         raise NotImplementedError  # pragma: no cover
 
     @abstractmethod
     def set_credentials(self, credentials):
-        """Set new user credentials.
+        """Set new credentials.
 
         Args:
             credentials: The new credentials to be set.
 
         """
+        raise NotImplementedError  # pragma: no cover
+
+    @abstractmethod
+    def invalidate_credentials(self):
+        """Invalidate the current credentials."""
         raise NotImplementedError  # pragma: no cover
 
     async def close(self) -> None:

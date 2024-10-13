@@ -11,7 +11,7 @@ import logging
 import math
 from pathlib import Path
 import socket
-from typing import TYPE_CHECKING, Callable, Self
+from typing import TYPE_CHECKING, Callable, Coroutine, Self, Sequence, TypeVar
 
 import aiofiles
 from aiohttp.client import ClientError, ClientSession
@@ -31,6 +31,7 @@ from podme_api.exceptions import (
     PodMeApiError,
     PodMeApiNotFoundError,
     PodMeApiRateLimitError,
+    PodMeApiUnauthorizedError,
 )
 from podme_api.models import (
     PodMeCategory,
@@ -49,6 +50,9 @@ if TYPE_CHECKING:
     from os import PathLike
 
     from podme_api.auth.common import PodMeAuthClient
+    from podme_api.models import FetchedFileInfo
+
+T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -196,6 +200,16 @@ class PodMeClient:
                 raise PodMeApiNotFoundError("Resource not found")
             if response.status == HTTPStatus.BAD_REQUEST:
                 raise PodMeApiError("Bad request syntax or unsupported method")
+            if response.status == HTTPStatus.UNAUTHORIZED:
+                if self.auth_client.get_credentials() is None:
+                    raise PodMeApiUnauthorizedError(
+                        "Unauthorized access to the PodMe API. Please check your login credentials.",
+                    )
+                _LOGGER.warning(
+                    "Request to <%s> resulted in status 401. Retrying after invalidating credentials.", url
+                )
+                self.auth_client.invalidate_credentials()
+                return await self._request(uri, method, **kwargs)
 
             if content_type.startswith("application/json"):
                 raise PodMeApiError(response.status, json.loads(contents.decode("utf8")))
@@ -273,13 +287,14 @@ class PodMeClient:
                 data.extend(new_results)
         except PodMeApiError as err:
             _LOGGER.warning("Error occurred while fetching pages from %s: %s", uri, err)
+            raise
 
         return data
 
+    @staticmethod
     async def download_episode(
-        self,
-        path,
-        url,
+        path: PathLike,
+        url: str,
         on_progress: Callable[[dict], None] | None = None,
         on_finished: Callable[[dict], None] | None = None,
     ) -> bool:
@@ -307,7 +322,12 @@ class PodMeClient:
         if on_progress is not None:
             progress_hooks.append(on_progress)
 
-        ydl_opts = {"logger": _LOGGER, "progress_hooks": progress_hooks, "outtmpl": path}
+        ydl_opts = {
+            "logger": _LOGGER,
+            "progress_hooks": progress_hooks,
+            "outtmpl": str(path),
+            "quiet": True,
+        }
         loop = asyncio.get_event_loop()
         with YoutubeDL(ydl_opts) as ydl:
             try:
@@ -315,6 +335,57 @@ class PodMeClient:
                 return True
             except YoutubeDLError as err:
                 raise PodMeApiDownloadError(f"youtube-dl failed to harvest from {url} to {path}") from err
+
+    async def download_file(self, download_url: URL | str, path: PathLike) -> None:
+        """Download a file."""
+        download_url = URL(download_url)
+        save_path = Path(path)
+
+        if self.session is None:
+            self.session = ClientSession()
+            _LOGGER.debug("New session created.")
+            self._close_session = True
+
+        resp = await self.session.get(download_url)
+        async with aiofiles.open(save_path, mode="wb") as f:
+            _LOGGER.debug("Starting download of <%s>", download_url)
+            data = await resp.read()
+            _LOGGER.debug("Writing data to <%s>", save_path)
+            await f.write(data)
+
+        _LOGGER.debug("Finished download of <%s> to <%s>", download_url, save_path)
+
+    async def download_files(self, download_info: list[tuple[URL | str, PathLike]]):
+        """Download multiple files."""
+        return await self._run_concurrent(self.download_file, download_info)
+
+    async def get_episode_download_url(self, episode: PodMeEpisode | int) -> tuple[int, URL] | None:
+        """Get the download URL for an episode.
+
+        Args:
+            episode (PodMeEpisode | int): The episode object or episode ID to get the download URL for.
+
+        Returns:
+            tuple[int, URL]: The episode ID and the download URL.
+
+        """
+        episode_data = episode
+        if isinstance(episode_data, int):
+            episode_data = await self.get_episode_info(episode)
+        if episode_data.stream_url is None:
+            _LOGGER.warning("No stream URL found for episode <%s>", episode_data.id)
+            return None
+        info = await self.resolve_stream_url(URL(episode_data.stream_url))
+        if info is None:
+            return None
+        return episode_data.id, URL(info["url"])
+
+    async def get_episode_download_url_bulk(
+        self,
+        episodes: list[PodMeEpisode | int],
+    ) -> list[Coroutine[any, any, tuple[int, URL] | None]]:
+        """Get the download URL for a list of episodes."""
+        return await self._run_concurrent(self.get_episode_download_url, episodes)
 
     async def get_username(self) -> str:
         """Get the username of the authenticated user."""
@@ -668,6 +739,124 @@ class PodMeClient:
         """
         episodes = await self.get_episode_list(podcast_slug)
         return [e.id for e in episodes]
+
+    async def check_stream_url(self, stream_url: URL | str) -> FetchedFileInfo | None:
+        """Check if a stream URL is downloadable.
+
+        Args:
+            stream_url (URL | str): The URL to check.
+
+        Returns:
+            The content length and content type if the URL is downloadable, None otherwise.
+
+        """
+        if self.session is None:
+            self.session = ClientSession()
+            _LOGGER.debug("New session created.")
+            self._close_session = True
+
+        stream_url = URL(stream_url)
+
+        _LOGGER.debug("Checking stream URL: <%s>", stream_url)
+
+        # Check if the audio URL is directly downloadable
+        response = await self.session.head(stream_url)
+        if response.status != HTTPStatus.OK:
+            _LOGGER.warning("Stream URL is not downloadable: <%s>", stream_url)
+            return None
+        content_length = response.headers.get("Content-Length")
+        content_type = response.headers.get("Content-Type")
+
+        _LOGGER.debug("Stream URL is downloadable as <%s>: <%s>", content_type, stream_url)
+
+        return {
+            "content_length": int(content_length),
+            "content_type": content_type,
+            "url": str(stream_url),
+        }
+
+    async def resolve_stream_url(self, stream_url: URL | str) -> FetchedFileInfo | None:
+        """Check if a stream URL is downloadable.
+
+        Args:
+            stream_url (URL | str): The URL to check.
+
+        Returns:
+            The content length and content type if the URL is downloadable, None otherwise.
+
+        """
+
+        if self.session is None:
+            self.session = ClientSession()
+            _LOGGER.debug("New session created.")
+            self._close_session = True
+
+        stream_url = URL(stream_url)
+
+        if "m3u8" in str(stream_url):
+            return await self._resolve_m3u8_url(stream_url)
+
+        return await self.check_stream_url(stream_url)
+
+    async def _resolve_m3u8_url(self, master_url: URL | str) -> FetchedFileInfo | None:
+        """Resolve a master.m3u8 URL to an audio segment URL.
+
+        Args:
+            master_url (URL | str): The URL to check.
+
+        Returns:
+            The content length and content type if the URL is downloadable, None otherwise.
+
+        """
+
+        if self.session is None:
+            self.session = ClientSession()
+            _LOGGER.debug("New session created.")
+            self._close_session = True
+
+        master_url = URL(master_url)
+
+        _LOGGER.debug("Resolving m3u8 URL: <%s>", master_url)
+
+        # Fetch master.m3u8
+        response = await self.session.get(master_url)
+        master_content = await response.text()
+
+        # Parse master.m3u8 to get the audio playlist URL (first match only).
+        audio_playlist_url: URL | None = None
+        for line in master_content.splitlines():
+            if line.endswith(".m3u8"):
+                audio_playlist_url = master_url.join(URL(line.strip()))
+                break
+
+        if audio_playlist_url is None:
+            _LOGGER.warning("Could not find audio playlist URL in <%s>", master_url)
+            return None
+
+        # Fetch audio playlist
+        response = await self.session.get(audio_playlist_url)
+        audio_playlist_content = await response.text()
+
+        # Parse audio playlist to get the audio segment URL
+        audio_segment_url = None
+        for line in audio_playlist_content.splitlines():
+            if line.startswith("#"):
+                continue
+            if "mp4" in line:
+                audio_segment_url = audio_playlist_url.join(URL(line.strip())).with_query(None)
+                break
+
+        if not audio_segment_url:
+            _LOGGER.warning("Could not find audio segment URL in audio playlist")
+            return None
+
+        return await self.check_stream_url(audio_segment_url)
+
+    @staticmethod
+    async def _run_concurrent(func: Callable[..., T], args_list: Sequence[any]) -> list[T]:
+        """Run multiple requests concurrently."""
+        tasks = [func(*args) if isinstance(args, tuple) else func(args) for args in args_list]
+        return await asyncio.gather(*tasks)
 
     async def close(self) -> None:
         """Close open client session."""

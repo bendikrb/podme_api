@@ -25,5 +25,9 @@ class PodMeApiAuthenticationError(PodMeApiError):
     """PodMe authentication exception."""
 
 
+class PodMeApiUnauthorizedError(PodMeApiError):
+    """PodMe unauthorized exception."""
+
+
 class PodMeApiDownloadError(PodMeApiError):
     """PodMe download exception."""

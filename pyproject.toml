@@ -135,7 +135,8 @@ runtime-evaluated-base-classes = [
 ]
 
 [tool.ruff.lint.pylint]
-max-branches = 14
+max-branches = 15
+max-statements = 60
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

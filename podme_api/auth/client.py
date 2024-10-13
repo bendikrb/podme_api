@@ -337,3 +337,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             self._credentials = SchibstedCredentials.from_dict(credentials)
         else:
             self._credentials = SchibstedCredentials.from_json(credentials)
+
+    def invalidate_credentials(self):
+        """Invalidate the current credentials."""
+        self._credentials = None

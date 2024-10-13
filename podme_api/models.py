@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import IntEnum, StrEnum, auto
+from typing import TypedDict
 
 from mashumaro import field_options
 from mashumaro.config import BaseConfig
@@ -410,3 +411,11 @@ class PodMeSubscription(BaseDataClassORJSONMixin):
     image_url: str | None = field(default=None, metadata=field_options(alias="imageUrl"))
     podcast_id: int | None = field(default=None, metadata=field_options(alias="podcastId"))
     podcast_title: str | None = field(default=None, metadata=field_options(alias="podcastTitle"))
+
+
+class FetchedFileInfo(TypedDict):
+    """Fetched file info."""
+
+    content_length: int
+    content_type: str | None
+    url: str | None
