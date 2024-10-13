@@ -107,10 +107,22 @@ async def test_get_user_podcasts(aresponses: ResponsesMockServer, podme_client):
 async def test_get_currently_playing(aresponses: ResponsesMockServer, podme_client):
     fixture = load_fixture_json("episode_currentlyplaying")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/episode/currentlyplaying",
-        "GET",
-        json_response(data=fixture),
+        response=json_response(data=fixture),
+        route=CustomRoute(
+            host_pattern=URL(PODME_API_URL).host,
+            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_qs={"page": 0},
+            method_pattern="GET",
+        ),
+    )
+    aresponses.add(
+        response=json_response(data=[]),
+        route=CustomRoute(
+            host_pattern=URL(PODME_API_URL).host,
+            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_qs={"page": 1},
+            method_pattern="GET",
+        ),
     )
     async with podme_client() as client:
         client: PodMeClient
@@ -633,7 +645,7 @@ async def test_session_close():
     await auth_client.close()
     auth_client.session.close.assert_called_once()
 
-    client = PodMeClient(auth_client=auth_client)
+    client = PodMeClient(auth_client=auth_client, disable_credentials_storage=True)
     client.session = AsyncMock(spec=aiohttp.ClientSession)
     client._close_session = True  # pylint: disable=protected-access
     await client.close()
@@ -643,7 +655,7 @@ async def test_session_close():
 async def test_context_manager(podme_default_auth_client):
     async with podme_default_auth_client() as auth_client:
         assert isinstance(auth_client, PodMeDefaultAuthClient)
-        async with PodMeClient(auth_client=auth_client) as client:
+        async with PodMeClient(auth_client=auth_client, disable_credentials_storage=True) as client:
             assert isinstance(client, PodMeClient)
         assert client.session is None or client.session.closed
     assert auth_client.session is None or auth_client.session.closed
