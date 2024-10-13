@@ -8,7 +8,8 @@ import logging
 from rich.console import Console
 from rich.logging import RichHandler
 
-from podme_api.auth import PodMeDefaultAuthClient, PodMeUserCredentials
+from podme_api.auth import PodMeDefaultAuthClient
+from podme_api.auth.models import PodMeUserCredentials
 from podme_api.client import PodMeClient
 
 console = Console()

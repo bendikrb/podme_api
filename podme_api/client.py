@@ -59,26 +59,23 @@ class PodMeClient:
 
     This class provides methods to authenticate, manage user data, and interact
     with podcasts and episodes through the PodMe service.
-
-    Attributes:
-        auth_client (PodMeAuthClient): The authentication client.
-        disable_credentials_storage (bool): Whether to disable credential storage.
-        language (PodMeLanguage): The language setting for the client.
-        region (PodMeRegion): The region setting for the client.
-        request_timeout (int): The timeout for API requests in seconds.
-        session (ClientSession | None): The aiohttp client session.
-
     """
 
     auth_client: PodMeAuthClient
+    """auth_client (PodMeAuthClient): The authentication client."""
 
     disable_credentials_storage: bool = False
+    """Whether to disable credential storage."""
 
     language = PodMeLanguage.NO
+    """(PodMeLanguage): The language setting for the client."""
     region = PodMeRegion.NO
+    """(PodMeRegion): The region setting for the client."""
 
     request_timeout: int = 8
+    """The timeout for API requests in seconds."""
     session: ClientSession | None = None
+    """(ClientSession | None): The :class:`aiohttp.ClientSession` to use for API requests."""
 
     _conf_dir = platformdirs.user_config_dir(__package__, ensure_exists=True)
     _close_session: bool = False

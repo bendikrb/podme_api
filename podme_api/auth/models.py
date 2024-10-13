@@ -10,13 +10,7 @@ from podme_api.models import BaseDataClassORJSONMixin
 
 @dataclass
 class PodMeUserCredentials:
-    """Represents user credentials for PodMe authentication.
-
-    Attributes:
-        email (str): The user's email address.
-        password (str): The user's password.
-
-    """
+    """Represents user's login details for PodMe authentication."""
 
     email: str
     password: str
@@ -24,23 +18,7 @@ class PodMeUserCredentials:
 
 @dataclass
 class SchibstedCredentials(BaseDataClassORJSONMixin):
-    """Represents Schibsted authentication credentials.
-
-    Attributes:
-        scope (str): The scope of the authentication.
-        user_id (str): The user's unique identifier.
-        is_admin (bool): Indicates if the user has admin privileges.
-        token_type (str): The type of authentication token.
-        access_token (str): The access token for authentication.
-        refresh_token (str): The refresh token for obtaining new access tokens.
-        expires_in (int): The token expiration time in seconds.
-        id_token (str): The ID token for the authenticated user.
-        server_time (datetime): The server time when the token was issued.
-        expiration_time (datetime): The expiration time of the token.
-        account_created (bool | None): Indicates if the account was newly created.
-        email (str | None): The user's email address.
-
-    """
+    """Represents Schibsted authentication credentials."""
 
     scope: str
     user_id: str
@@ -71,32 +49,7 @@ class SchibstedCredentials(BaseDataClassORJSONMixin):
 
 @dataclass
 class SchibstedAuthClientData(BaseDataClassORJSONMixin):
-    """Represents Schibsted authentication client data.
-
-    Attributes:
-        app_type (str): The type of the application.
-        birthday_format (str): The format used for birthdays.
-        company (str): The company name.
-        css (dict): CSS-related information.
-        default_client_id (str): The default client ID.
-        domain (str): The domain associated with the client.
-        email_receipts_enabled (bool): Indicates if email receipts are enabled.
-        id (str): The client's unique identifier.
-        locale (str): The locale setting for the client.
-        logo_mark_url (str): The URL of the logo mark.
-        logo_url (str): The URL of the main logo.
-        merchant_id (int): The merchant's unique identifier.
-        merchant_name (str): The name of the merchant.
-        merchant_type (str): The type of merchant.
-        name (str): The name of the client.
-        pulse_provider_id (str): The Pulse provider ID.
-        session_service_domain (str): The domain for the session service.
-        support_url (str): The URL for support.
-        terms (dict): Terms-related information.
-        uri_scheme (str): The URI scheme used by the client.
-        teaser (dict | None): Teaser-related information, if available.
-
-    """
+    """Represents Schibsted authentication client data."""
 
     app_type: str = field(metadata=field_options(alias="appType"))
     birthday_format: str = field(metadata=field_options(alias="birthdayFormat"))
@@ -123,19 +76,7 @@ class SchibstedAuthClientData(BaseDataClassORJSONMixin):
 
 @dataclass
 class PodMeBffData(BaseDataClassORJSONMixin):
-    """Represents PodMe Backend-for-Frontend (BFF) data.
-
-    Attributes:
-        bff (dict): Backend-for-Frontend related information.
-        client (SchibstedAuthClientData): Schibsted authentication client data.
-        csrf_token (str): The CSRF token for security.
-        default_terms_agreement (bool): Indicates if default terms are agreed to.
-        initial_state (dict): The initial state of the application.
-        pulse (dict): Pulse-related information.
-        re_captcha_site_key (str): The reCAPTCHA site key.
-        spid_url (str): The SPiD URL.
-
-    """
+    """Represents PodMe Backend-for-Frontend (BFF) data."""
 
     bff: dict
     client: SchibstedAuthClientData

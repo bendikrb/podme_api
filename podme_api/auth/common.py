@@ -24,22 +24,19 @@ class PodMeAuthClient(ABC):
     This class provides a framework for handling authentication and making
     requests to the PodMe API. It manages user credentials, access tokens,
     and client sessions.
-
-    Attributes:
-        user_credentials (PodMeUserCredentials | None): User authentication credentials.
-        session (ClientSession | None): HTTP client session for making requests.
-        request_timeout (float): Timeout for API requests in seconds.
-        _close_session (bool): Flag to determine if the session should be closed.
-        _access_token (str | None): Cached access token for authentication.
-
     """
 
     user_credentials: PodMeUserCredentials | None = None
+    """(PodMeUserCredentials | None): User authentication credentials."""
     session: ClientSession | None = None
+    """(ClientSession | None): The :class:`aiohttp.ClientSession` to use for making requests."""
     request_timeout: float = TIMEOUT
+    """Timeout for API requests in seconds."""
 
     _close_session: bool = False
+    """Flag to determine if the session should be closed."""
     _access_token: str | None = None
+    """Cached access token for authentication."""
 
     @abstractmethod
     async def async_get_access_token(self) -> str:

@@ -1,5 +1,4 @@
 from importlib.metadata import Distribution
-import os
 from pathlib import Path
 import sys
 
@@ -53,7 +52,7 @@ autodoc_typehints_format = "short"
 
 autodoc_default_options = {
     "members": True,
-    "inherited-members": "BaseDataClassORJSONMixin, DataClassORJSONMixin, StrEnum, str, Enum, dict, object",
+    "inherited-members": "BaseDataClassORJSONMixin, DataClassORJSONMixin, StrEnum, IntEnum, str, Enum, dict, object",
     "exclude-members": "Config, from_dict, from_dict_json, from_json, to_dict, to_dict_json, to_dict_jsonb, to_jsonb, __init__, __new__",
     "undoc-members": True,
     "show-inheritance": True,

@@ -1,9 +1,6 @@
-from .client import PodMeAuthClient, PodMeDefaultAuthClient, SchibstedCredentials
-from .models import PodMeUserCredentials
+from .client import PodMeAuthClient, PodMeDefaultAuthClient
 
 __all__ = [
     "PodMeAuthClient",
     "PodMeDefaultAuthClient",
-    "PodMeUserCredentials",
-    "SchibstedCredentials",
 ]

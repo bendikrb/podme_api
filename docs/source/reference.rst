@@ -6,6 +6,7 @@ Reference
 
    reference/api
    reference/auth
+   reference/exceptions
 
 .. toctree::
    :maxdepth: 2

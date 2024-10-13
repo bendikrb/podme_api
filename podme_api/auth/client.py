@@ -30,7 +30,7 @@ from podme_api.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from auth.models import PodMeUserCredentials
+    from podme_api.auth.models import PodMeUserCredentials
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,15 +43,11 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
     """Default authentication client for PodMe.
 
     This class handles authentication using Schibsted credentials for the PodMe service.
-
-    Attributes:
-        user_agent (str): User agent string for API requests.
-        device_data (dict): Device information for authentication.
-        credentials (SchibstedCredentials, optional): Authentication credentials.
-
     """
 
     user_agent = PODME_AUTH_USER_AGENT
+    """User agent string for API requests."""
+
     device_data = {
         "platform": "Ubuntu",
         "userAgent": "Firefox",
@@ -81,8 +77,10 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             "WebKit built-in PDF::Portable Document Format::application/pdf~pdf,text/pdf~pdf",
         ],
     }
+    """Device information for authentication."""
 
     credentials: SchibstedCredentials | None = None
+    """(SchibstedCredentials | None): Authentication credentials."""
 
     _credentials: SchibstedCredentials | None = field(default=None, init=False)
     _close_session: bool = False
