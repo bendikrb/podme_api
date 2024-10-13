@@ -19,29 +19,57 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class PodMeAuthClient(ABC):
-    """Abstract class to make authenticated requests."""
+    """Abstract base class for making authenticated requests to PodMe API.
+
+    This class provides a framework for handling authentication and making
+    requests to the PodMe API. It manages user credentials, access tokens,
+    and client sessions.
+
+    Attributes:
+        user_credentials (PodMeUserCredentials | None): User authentication credentials.
+        session (ClientSession | None): HTTP client session for making requests.
+        request_timeout (float): Timeout for API requests in seconds.
+        _close_session (bool): Flag to determine if the session should be closed.
+        _access_token (str | None): Cached access token for authentication.
+
+    """
 
     user_credentials: PodMeUserCredentials | None = None
     session: ClientSession | None = None
-    request_timeout: int = TIMEOUT
+    request_timeout: float = TIMEOUT
 
     _close_session: bool = False
     _access_token: str | None = None
 
     @abstractmethod
     async def async_get_access_token(self) -> str:
-        """Return a valid access token."""
-        raise NotImplementedError
+        """Asynchronously retrieve a valid access token.
+
+        Returns:
+            str: A valid access token for authentication.
+
+        """
+        raise NotImplementedError  # pragma: no cover
 
     @abstractmethod
     def get_credentials(self) -> dict | None:
-        """Return credentials as dict."""
-        raise NotImplementedError
+        """Retrieve the current user credentials.
+
+        Returns:
+            dict | None: A dictionary containing user credentials, or None if not set.
+
+        """
+        raise NotImplementedError  # pragma: no cover
 
     @abstractmethod
     def set_credentials(self, credentials):
-        """Return credentials as dict."""
-        raise NotImplementedError
+        """Set new user credentials.
+
+        Args:
+            credentials: The new credentials to be set.
+
+        """
+        raise NotImplementedError  # pragma: no cover
 
     async def close(self) -> None:
         """Close open client session."""

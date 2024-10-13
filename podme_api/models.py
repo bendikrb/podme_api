@@ -19,31 +19,6 @@ class BaseDataClassORJSONMixin(DataClassORJSONMixin):
         allow_deserialization_not_by_alias = True
 
 
-@dataclass
-class PodMeCredentials(BaseDataClassORJSONMixin):
-    access_token: str
-    token_type: str
-    expires_in: int
-    id_token: str
-    refresh_token: str | None = field(default=None, metadata=field_options(alias="refreshToken"))
-    scope: str | None = field(default=None, metadata=field_options(alias="scope"))
-    user_id: int | None = field(default=None, metadata=field_options(alias="userId"))
-    is_admin: bool | None = field(default=None, metadata=field_options(alias="isAdmin"))
-    server_time: int | None = field(default=None, metadata=field_options(alias="serverTime"))
-    expiration_time: datetime | None = field(default=None, metadata=field_options(alias="expirationTime"))
-
-    @property
-    def is_expired(self):
-        return False
-
-    @classmethod
-    def __pre_deserialize__(cls, d: dict[any, any]) -> dict[any, any]:
-        # Convert an empty string to None.
-        if not d.get("expiration_time"):
-            d["expiration_time"] = None
-        return d
-
-
 class PodMeModels(StrEnum):
     """Enumeration of utilized PodMe models."""
 
@@ -57,6 +32,8 @@ class PodMeModels(StrEnum):
 
 
 class PodMeLanguage(StrEnum):
+    """Enumeration of supported PodMe languages."""
+
     SE = auto()
     NO = auto()
     FI = auto()
@@ -66,6 +43,8 @@ class PodMeLanguage(StrEnum):
 
 
 class PodMeRegion(IntEnum):
+    """Enumeration of PodMe regions."""
+
     SE = 1
     NO = 2
     FI = 3
@@ -77,12 +56,15 @@ class PodMeRegion(IntEnum):
         return self.name.lower()
 
     @property
-    def default_language(self):
+    def default_language(self):  # pragma: no cover
+        """Get the default language for the region."""
         return PodMeLanguage[self.name]
 
 
 @dataclass
 class PodMeCategory(BaseDataClassORJSONMixin):
+    """Represents a PodMe category."""
+
     id: int
     name: str
     key: str
@@ -91,6 +73,8 @@ class PodMeCategory(BaseDataClassORJSONMixin):
 
 @dataclass
 class PodMeCategoryPageSectionContent(BaseDataClassORJSONMixin):
+    """Base class for PodMe category page section content."""
+
     title: str
     type: str
 
@@ -103,6 +87,8 @@ class PodMeCategoryPageSectionContent(BaseDataClassORJSONMixin):
 
 @dataclass
 class PodMeCategoryPagePodcastCarousel(PodMeCategoryPageSectionContent):
+    """Represents a podcast carousel in a PodMe category page section."""
+
     type = "podcastCarousel"
     podcasts: list[PodMeHomeSectionPodcast]
     is_top_list: bool | None = field(default=None, metadata=field_options(alias="isTopList"))
@@ -112,6 +98,8 @@ class PodMeCategoryPagePodcastCarousel(PodMeCategoryPageSectionContent):
 
 @dataclass
 class PodMeCategoryPagePodcastPromoCarousel(PodMeCategoryPageSectionContent):
+    """Represents a podcast promo carousel in a PodMe category page section."""
+
     type = "podcastPromoCarousel"
     promoted_podcasts: list[PodMeHomeSectionPodcast] = field(metadata=field_options(alias="promotedPodcasts"))
     is_top_list: bool | None = field(default=None, metadata=field_options(alias="isTopList"))
@@ -119,6 +107,8 @@ class PodMeCategoryPagePodcastPromoCarousel(PodMeCategoryPageSectionContent):
 
 @dataclass
 class PodMeCategoryPageEpisodePromoCarousel(PodMeCategoryPageSectionContent):
+    """Represents an episode promo carousel in a PodMe category page section."""
+
     type = "episodePromoCarousel"
     promoted_episodes: list[PodMeHomeSectionEpisode] = field(metadata=field_options(alias="promotedEpisodes"))
     is_top_list: bool | None = field(default=None, metadata=field_options(alias="isTopList"))
@@ -126,6 +116,8 @@ class PodMeCategoryPageEpisodePromoCarousel(PodMeCategoryPageSectionContent):
 
 @dataclass
 class PodMeCategoryPageBannerWithEpisodeList(PodMeCategoryPageSectionContent):
+    """Represents a banner with episode list in a PodMe category page section."""
+
     type = "bannerWithEpisodeList"
     description: str
     hide_title: bool = field(metadata=field_options(alias="hideTitle"))
@@ -135,6 +127,8 @@ class PodMeCategoryPageBannerWithEpisodeList(PodMeCategoryPageSectionContent):
 
 @dataclass
 class PodMeHomeEpisodeList(BaseDataClassORJSONMixin):
+    """Represents a list of episodes in the PodMe home screen."""
+
     title: str
     type: str
     episodes: list[PodMeHomeSectionEpisode]
@@ -142,6 +136,8 @@ class PodMeHomeEpisodeList(BaseDataClassORJSONMixin):
 
 @dataclass
 class PodMeHomeSectionHeroCard(BaseDataClassORJSONMixin):
+    """Base class for PodMe home section hero cards."""
+
     type: str
 
     class Config(BaseConfig):
@@ -153,6 +149,8 @@ class PodMeHomeSectionHeroCard(BaseDataClassORJSONMixin):
 
 @dataclass
 class PodMeHomeSectionEpisodeHeroCard(PodMeHomeSectionHeroCard):
+    """Represents an episode hero card in a PodMe home section."""
+
     type = "episode"
     podcast_id: int = field(metadata=field_options(alias="podcastId"))
     has_podcast_bookmark: bool = field(metadata=field_options(alias="hasPodcastBookmark"))
@@ -168,6 +166,8 @@ class PodMeHomeSectionEpisodeHeroCard(PodMeHomeSectionHeroCard):
 
 @dataclass
 class PodMeCategoryPagePodcastNuggets(PodMeCategoryPageSectionContent):
+    """Represents podcast nuggets in a PodMe category page section."""
+
     type = "podcastNuggets"
     subtitle: str
     episode_lists: list[PodMeHomeEpisodeList] = field(metadata=field_options(alias="episodeLists"))
@@ -175,29 +175,39 @@ class PodMeCategoryPagePodcastNuggets(PodMeCategoryPageSectionContent):
 
 @dataclass
 class PodMeCategoryPageEpisodeCarousel(PodMeCategoryPageSectionContent):
+    """Represents an episode carousel in a PodMe category page section."""
+
     type = "episodeCarousel"
     episodes: list[PodMeHomeSectionEpisode]
 
 
 @dataclass
 class PodMeSectionHeroCards(PodMeCategoryPageSectionContent):
+    """Represents a list of hero cards in a PodMe section."""
+
     type = "listOfHeroCards"
     hero_cards: list[PodMeHomeSectionHeroCard] = field(metadata=field_options(alias="heroCards"))
 
 
 @dataclass
 class PodMeCategoryPageSection(BaseDataClassORJSONMixin):
+    """Represents a section in a PodMe category page."""
+
     content: PodMeCategoryPageSectionContent
 
 
 @dataclass
 class PodMeHomeScreen(BaseDataClassORJSONMixin):
+    """Represents the PodMe home screen."""
+
     sections: list[PodMeCategoryPageSection]
     type: str
 
 
 @dataclass
 class PodMeCategoryPage(PodMeHomeScreen):
+    """Represents a PodMe category page."""
+
     title: str
     display_title: str = field(metadata=field_options(alias="displayTitle"))
     description: str
@@ -205,6 +215,8 @@ class PodMeCategoryPage(PodMeHomeScreen):
 
 @dataclass
 class PodMePodcastBase(BaseDataClassORJSONMixin):
+    """Base class for PodMe podcasts."""
+
     id: int
     title: str
     is_premium: bool = field(metadata=field_options(alias="isPremium"))
@@ -214,6 +226,8 @@ class PodMePodcastBase(BaseDataClassORJSONMixin):
 
 @dataclass
 class PodMePodcast(PodMePodcastBase):
+    """Represents a PodMe podcast with extended information."""
+
     small_image_url: str | None = field(default=None, metadata=field_options(alias="smallImageUrl"))
     medium_image_url: str | None = field(default=None, metadata=field_options(alias="mediumImageUrl"))
     large_image_url: str | None = field(default=None, metadata=field_options(alias="largeImageUrl"))
@@ -239,6 +253,8 @@ class PodMePodcast(PodMePodcastBase):
 
 @dataclass
 class PodMeHomeSectionPodcast(PodMePodcastBase):
+    """Represents a podcast in a PodMe home section."""
+
     destination: str | None = None
     destination_path: str | None = field(default=None, metadata=field_options(alias="destinationPath"))
     description: str | None = None
@@ -247,12 +263,16 @@ class PodMeHomeSectionPodcast(PodMePodcastBase):
 
 @dataclass
 class PodMeHomeSection(BaseDataClassORJSONMixin):
+    """Represents a section in the PodMe home screen."""
+
     title: str
     podcasts: list[PodMeHomeSectionPodcast]
 
 
 @dataclass
 class PodMeSearchResult(BaseDataClassORJSONMixin):
+    """Represents a search result in PodMe."""
+
     podcast_id: int = field(metadata=field_options(alias="podcastId"))
     podcast_title: str = field(metadata=field_options(alias="podcastTitle"))
     image_url: str = field(metadata=field_options(alias="imageUrl"))
@@ -265,6 +285,8 @@ class PodMeSearchResult(BaseDataClassORJSONMixin):
 
 @dataclass(kw_only=True)
 class PodMeEpisodeBase(BaseDataClassORJSONMixin):
+    """Base class for PodMe episodes."""
+
     id: int
     podcast_id: int = field(metadata=field_options(alias="podcastId"))
     title: str
@@ -284,6 +306,8 @@ class PodMeEpisodeBase(BaseDataClassORJSONMixin):
 
 @dataclass(kw_only=True)
 class PodMeHomeSectionEpisode(PodMeEpisodeBase):
+    """Represents an episode in a PodMe home section."""
+
     audio_length: int = field(metadata=field_options(alias="audioLength"))
     is_playable: bool = field(metadata=field_options(alias="isPlayable"))
     podcast_slug: str = field(metadata=field_options(alias="podcastSlug"))
@@ -293,6 +317,8 @@ class PodMeHomeSectionEpisode(PodMeEpisodeBase):
 
 @dataclass(kw_only=True)
 class PodMeEpisode(PodMeEpisodeBase):
+    """Represents a PodMe episode with extended information."""
+
     author_full_name: str = field(metadata=field_options(alias="authorFullName"))
     small_image_url: str = field(metadata=field_options(alias="smallImageUrl"))
     medium_image_url: str = field(metadata=field_options(alias="mediumImageUrl"))
@@ -315,6 +341,8 @@ class PodMeEpisode(PodMeEpisodeBase):
 
 @dataclass
 class PodMeEpisodeData(PodMeEpisode):
+    """Represents detailed data for a PodMe episode."""
+
     number: int = field(metadata=field_options(alias="number"))
     byte_length: int = field(metadata=field_options(alias="byteLength"))
     url: str = field(metadata=field_options(alias="url"))
@@ -335,6 +363,8 @@ class PodMeEpisodeData(PodMeEpisode):
 
 @dataclass
 class PodMeSubscriptionPlan(BaseDataClassORJSONMixin):
+    """Represents a PodMe subscription plan."""
+
     name: str
     package_id: int = field(metadata=field_options(alias="packageId"))
     price_decimal: float = field(metadata=field_options(alias="priceDecimal"))
@@ -354,6 +384,8 @@ class PodMeSubscriptionPlan(BaseDataClassORJSONMixin):
 
 @dataclass
 class PodMeSubscription(BaseDataClassORJSONMixin):
+    """Represents a PodMe subscription."""
+
     subscription_state: int = field(metadata=field_options(alias="subscriptionState"))
     subscription_type: int = field(metadata=field_options(alias="subscriptionType"))
     subscription_platform: int = field(metadata=field_options(alias="subscriptionPlatform"))

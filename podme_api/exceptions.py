@@ -23,3 +23,7 @@ class PodMeApiRateLimitError(PodMeApiConnectionError):
 
 class PodMeApiAuthenticationError(PodMeApiError):
     """PodMe authentication exception."""
+
+
+class PodMeApiDownloadError(PodMeApiError):
+    """PodMe download exception."""

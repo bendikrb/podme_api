@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http import HTTPStatus
 import json
 import logging
@@ -9,13 +9,19 @@ import socket
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
-from aiohttp import ClientError, ClientResponseError, ClientSession
+from aiohttp import ClientError, ClientResponse, ClientResponseError, ClientSession
 from aiohttp.hdrs import METH_GET, METH_POST
 from yarl import URL
 
 from podme_api.auth.common import PodMeAuthClient
 from podme_api.auth.models import SchibstedCredentials
 from podme_api.auth.utils import get_now_iso, get_uuid, parse_schibsted_auth_html
+from podme_api.const import (
+    PODME_AUTH_BASE_URL,
+    PODME_AUTH_RETURN_URL,
+    PODME_AUTH_USER_AGENT,
+    PODME_BASE_URL,
+)
 from podme_api.exceptions import (
     PodMeApiAuthenticationError,
     PodMeApiConnectionError,
@@ -28,16 +34,24 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+
 CLIENT_ID = "66fd26cdae6bde57ef206b35"
-BASE_URL = "https://payment.schibsted.no"
-PODME_BASE_URL = "https://podme.com"
-RETURN_URL = f"{PODME_BASE_URL}/no/oppdag"
 
 
 @dataclass
 class PodMeDefaultAuthClient(PodMeAuthClient):
-    user_agent = DEFAULT_USER_AGENT
+    """Default authentication client for PodMe.
+
+    This class handles authentication using Schibsted credentials for the PodMe service.
+
+    Attributes:
+        user_agent (str): User agent string for API requests.
+        device_data (dict): Device information for authentication.
+        credentials (SchibstedCredentials, optional): Authentication credentials.
+
+    """
+
+    user_agent = PODME_AUTH_USER_AGENT
     device_data = {
         "platform": "Ubuntu",
         "userAgent": "Firefox",
@@ -68,8 +82,15 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         ],
     }
 
-    _credentials: SchibstedCredentials | None = None
+    credentials: SchibstedCredentials | None = None
+
+    _credentials: SchibstedCredentials | None = field(default=None, init=False)
     _close_session: bool = False
+
+    def __post_init__(self):
+        """Initialize the client after dataclass initialization."""
+        if self.credentials is not None:
+            self.set_credentials(self.credentials)
 
     @property
     def request_header(self) -> dict[str, str]:
@@ -86,9 +107,30 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         method: str = METH_GET,
         base_url: str | None = None,
         **kwargs,
-    ):
+    ) -> ClientResponse:
+        """Make an API request to the PodMe server.
+
+        Args:
+            uri (str): The URI for the API endpoint.
+            method (str, optional): The HTTP method to use. Defaults to METH_GET.
+            base_url (str | None, optional): The base URL for the request. Defaults to None.
+            **kwargs: Additional keyword arguments for the request. Common kwargs include:
+                - params (dict): Query parameters for the request.
+                - headers (dict): Additional headers to send with the request.
+                - data (dict): Form data to send in the request body.
+                - json (dict): JSON data to send in the request body.
+
+        Returns:
+            ClientResponse: The response from the API request.
+
+        Raises:
+            PodMeApiConnectionTimeoutError: If a timeout occurs during the request.
+            PodMeApiError: If there's a bad request syntax or unsupported method.
+            PodMeApiConnectionError: For other API communication errors.
+
+        """
         if base_url is None:
-            base_url = BASE_URL
+            base_url = PODME_AUTH_BASE_URL
         url = URL(base_url).join(URL(uri))
         headers = {
             **self.request_header,
@@ -131,7 +173,16 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
 
         return response
 
-    async def async_get_access_token(self):
+    async def async_get_access_token(self) -> str:
+        """Get a valid access token.
+
+        Returns:
+            str: The access token.
+
+        Raises:
+            PodMeApiAuthenticationError: If no user credentials are provided.
+
+        """
         if not self._credentials:
             if not self.user_credentials:
                 raise PodMeApiAuthenticationError("No user credentials provided")
@@ -142,7 +193,20 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             credentials = self._credentials
         return credentials.access_token
 
-    async def authorize(self, user_credentials: PodMeUserCredentials):
+    async def authorize(self, user_credentials: PodMeUserCredentials) -> SchibstedCredentials:
+        """Authorize the user and obtain credentials.
+
+        The obtained credentials is internally stored in the client.
+
+        Args:
+            user_credentials (PodMeUserCredentials): The user's credentials.
+
+        Raises:
+            PodMeApiConnectionTimeoutError: If a timeout occurs during a request.
+            PodMeApiError: If there's a bad request syntax or unsupported method.
+            PodMeApiConnectionError: For other API communication errors.
+
+        """
         # Authorize
         response = await self._request(
             "oauth/authorize",
@@ -153,7 +217,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
                 "scope": "openid email",
                 "state": json.dumps(
                     {
-                        "returnUrl": RETURN_URL,
+                        "returnUrl": PODME_AUTH_RETURN_URL,
                         "uuid": get_uuid(),
                         "schibstedFlowInitiatedDate": get_now_iso(),
                     }
@@ -217,16 +281,26 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         final_location = response.history[-1].headers.get("Location")
         jwt_cookie = response.history[-1].cookies.get("jwt-cred").value
         jwt_cred = unquote(jwt_cookie)
-        self._credentials = SchibstedCredentials.from_json(jwt_cred)
+        self.set_credentials(jwt_cred)
 
         _LOGGER.debug(f"Login successful: (final location: {final_location})")
 
-        if self._close_session:
-            await self.session.close()
+        await self.close()
 
         return self._credentials
 
     async def refresh_token(self, credentials: SchibstedCredentials | None = None):
+        """Refresh the access token.
+
+        The obtained credentials is internally stored in the client (:attr:`_credentials`).
+
+        Args:
+            credentials (SchibstedCredentials, optional): The credentials to refresh. Defaults to :attr:`_credentials`.
+
+        Returns:
+            SchibstedCredentials: The refreshed credentials.
+
+        """
         if credentials is None:
             credentials = self._credentials
 
@@ -239,19 +313,26 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             },
         )
         credentials = await response.json()
-        self._credentials = SchibstedCredentials.from_dict(credentials)
-        _LOGGER.debug(f"Got credentials: {self._credentials}")
+        self.set_credentials(credentials)
+        _LOGGER.debug(f"Refreshed credentials: {self.get_credentials()}")
 
-        if self._close_session:
-            await self.session.close()
+        await self.close()
+
         return self._credentials
 
-    def get_credentials(self):
+    def get_credentials(self) -> dict | None:
+        """Get the current credentials as a dictionary, or None if not set."""
         if self._credentials is not None:
             return self._credentials.to_dict()
         return None
 
     def set_credentials(self, credentials: SchibstedCredentials | dict | str):
+        """Set the credentials.
+
+        Args:
+            credentials (SchibstedCredentials | dict | str): The credentials to set.
+
+        """
         if isinstance(credentials, SchibstedCredentials):
             self._credentials = credentials
         elif isinstance(credentials, dict):
