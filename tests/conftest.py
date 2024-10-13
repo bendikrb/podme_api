@@ -6,7 +6,8 @@ import logging
 
 import pytest
 
-from podme_api.auth import PodMeDefaultAuthClient, PodMeUserCredentials, SchibstedCredentials
+from podme_api.auth import PodMeDefaultAuthClient
+from podme_api.auth.models import PodMeUserCredentials, SchibstedCredentials
 from podme_api.client import PodMeClient
 
 from .helpers import load_fixture_json
