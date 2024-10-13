@@ -47,6 +47,26 @@ class CustomRoute(Route):  # pragma: no cover
         match_partial_query=True,
         repeat=1,
     ):
+        """Initialize a CustomRoute instance.
+
+        Args:
+            method_pattern (str, optional): HTTP method to match. Defaults to ANY.
+            host_pattern (str, optional): Host to match. Defaults to ANY.
+            path_pattern (str, optional): Path to match. Defaults to ANY.
+            body_pattern (str, optional): Body to match. Defaults to ANY.
+            repeat (int, optional): Number of times to match. Defaults to 1.
+            path_qs (dict, optional): Query string parameters to match.
+            match_querystring (bool, optional): Whether to match the query string.
+                Defaults to True if `path_qs` is not None.
+            match_partial_query (bool, optional): Whether to match only part of the query string.
+
+                If `True`, the route will match if the query string contains all the specified query
+                parameters, regardless of other parameters present.
+
+                If `False`, the route will only match if the query string exactly matches the specified
+                query parameters in `path_qs`.
+
+        """
         super().__init__(method_pattern, host_pattern, path_pattern, body_pattern, match_querystring, repeat)
         if path_qs is not None:
             self.path_qs = urlencode({k: v for k, v in path_qs.items() if v is not None})
@@ -54,6 +74,12 @@ class CustomRoute(Route):  # pragma: no cover
             self.match_partial_query = match_partial_query
 
     async def matches(self, request):
+        """Check if the request matches this route.
+
+        Args:
+            request: The incoming request to match against.
+
+        """
         path_to_match = urlparse(request.path_qs)
         query_to_match = parse_qs(path_to_match.query)
         parsed_path = urlparse(self.path_pattern)

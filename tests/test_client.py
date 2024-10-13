@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import time
 import logging
 from unittest.mock import AsyncMock
 
@@ -42,24 +43,22 @@ logging.basicConfig(level=logging.DEBUG)
 PODME_API_PATH = URL(PODME_API_URL).path
 
 
-@pytest.mark.parametrize(
-    ("username", "password"),
-    [
-        ("testuser@example.com", "qwerty123"),
-    ],
-)
-async def test_username(aresponses: ResponsesMockServer, podme_client, username: str, password: str):
-    # fixture_name = "ipcheck"
-    # fixture = load_fixture_json(fixture_name)
+def test_version():
+    from podme_api.__version__ import __version__
+
+    assert __version__ == "0.0.0"
+
+
+async def test_username(aresponses: ResponsesMockServer, podme_client, default_credentials, user_credentials):
     aresponses.add(
         URL(PODME_API_URL).host,
         f"{PODME_API_PATH}/user",
         "GET",
-        Response(body=username),
+        Response(body=user_credentials.email),
     )
-    async with podme_client(username, password) as client:
+    async with podme_client(credentials=default_credentials, load_default_user_credentials=True) as client:
         result = await client.get_username()
-        assert result == username
+        assert result == user_credentials.email
 
 
 async def test_get_user_subscription(aresponses: ResponsesMockServer, podme_client):
@@ -177,6 +176,30 @@ async def test_get_category(aresponses: ResponsesMockServer, podme_client, categ
         result = await client.get_category(category_key)
         assert isinstance(result, PodMeCategory)
         assert result.id == category_id
+
+
+async def test_get_category_nonexistent(aresponses: ResponsesMockServer, podme_client):
+    fixture = load_fixture_json("cms_categories")
+    aresponses.add(
+        URL(PODME_API_URL).host,
+        f"{PODME_API_PATH}/cms/categories",
+        "GET",
+        json_response(data=fixture),
+    )
+    aresponses.add(
+        URL(PODME_API_URL).host,
+        f"{PODME_API_PATH}/cms/categories?region={PodMeRegion.NO.value}",
+        "GET",
+        json_response(data=fixture),
+        match_querystring=True,
+    )
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with pytest.raises(PodMeApiError):
+            await client.get_category(0)
+        with pytest.raises(PodMeApiError):
+            await client.get_category("1")
 
 
 @pytest.mark.parametrize(
@@ -324,6 +347,7 @@ async def test_podcast_subscription(aresponses: ResponsesMockServer, podme_clien
     ("episode_id", "progress"),
     [
         (4125238, "00:00:10"),
+        (4125238, time(second=10)),
         (4125238, None),
     ],
 )
@@ -513,7 +537,7 @@ async def test_timeout(aresponses: ResponsesMockServer, podme_client):
     async def response_handler(_: aiohttp.ClientResponse):
         """Response handler for this test."""
         await asyncio.sleep(2)
-        return aresponses.Response(body="Helluu")
+        return aresponses.Response(body="Helluu")  # pragma: no cover
 
     aresponses.add(
         URL(PODME_API_URL).host,
@@ -616,8 +640,8 @@ async def test_session_close():
     client.session.close.assert_called_once()
 
 
-async def test_context_manager():
-    async with PodMeDefaultAuthClient() as auth_client:
+async def test_context_manager(podme_default_auth_client):
+    async with podme_default_auth_client() as auth_client:
         assert isinstance(auth_client, PodMeDefaultAuthClient)
         async with PodMeClient(auth_client=auth_client) as client:
             assert isinstance(client, PodMeClient)

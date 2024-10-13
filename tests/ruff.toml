@@ -2,14 +2,16 @@
 extend = "../pyproject.toml"
 
 lint.extend-select = [
-  "PT", # Use @pytest.fixture without parentheses
+    "PT", # Use @pytest.fixture without parentheses
 ]
 
 lint.extend-ignore = [
-  "S101",
-  "SLF001",
-  "TCH002",
-  "PLR2004",
+    "S101",
+    "S105",
+    "S106",
+    "SLF001",
+    "TCH002",
+    "PLR2004",
 ]
 
 lint.pylint.max-branches = 13
