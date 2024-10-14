@@ -681,6 +681,16 @@ class PodMeClient:
         )
         return PodMeEpisode.from_dict(data)
 
+    async def get_episodes_info(self, episode_ids: list[int]) -> list[PodMeEpisode]:
+        """Get information about multiple episodes.
+
+        Args:
+            episode_ids (list[int]): The IDs of the episodes.
+
+        """
+        episodes = await asyncio.gather(*[self.get_episode_info(episode_id) for episode_id in episode_ids])
+        return list(episodes)
+
     async def search_podcast(
         self,
         search: str,
