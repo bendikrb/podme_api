@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
+from typing import TYPE_CHECKING
+from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
 
+from aiohttp.web_response import json_response
+from aresponses import ResponsesMockServer
 from aresponses.main import Route
 
 # noinspection PyProtectedMember
 from aresponses.utils import ANY, _text_matches_pattern
 import orjson
+from yarl import URL
+
+from podme_api.const import PODME_AUTH_BASE_URL, PODME_AUTH_RETURN_URL, PODME_BASE_URL
+
+if TYPE_CHECKING:
+    from podme_api import SchibstedCredentials
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -102,3 +111,87 @@ class CustomRoute(Route):  # pragma: no cover
             return False
 
         return True
+
+
+def setup_auth_mocks(aresponses: ResponsesMockServer, credentials: SchibstedCredentials):
+    auth_flow = load_fixture_json("auth_flow")
+
+    # GET oauth/authorize
+    aresponses.add(
+        URL(PODME_AUTH_BASE_URL).host,
+        "/oauth/authorize",
+        "GET",
+        aresponses.Response(body=auth_flow["login_form"]),
+        repeat=float("inf"),
+    )
+
+    # POST authn/api/settings/csrf
+    aresponses.add(
+        URL(PODME_AUTH_BASE_URL).host,
+        "/authn/api/settings/csrf",
+        "GET",
+        json_response(data=auth_flow["csrf"]),
+        repeat=float("inf"),
+    )
+
+    # POST authn/api/identity/email-status
+    aresponses.add(
+        URL(PODME_AUTH_BASE_URL).host,
+        "/authn/api/identity/email-status",
+        "POST",
+        json_response(data=auth_flow["email_status"]),
+        repeat=float("inf"),
+    )
+
+    # POST authn/api/identity/login/
+    aresponses.add(
+        URL(PODME_AUTH_BASE_URL).host,
+        "/authn/api/identity/login/",
+        "POST",
+        json_response(data=auth_flow["login"]),
+        repeat=float("inf"),
+    )
+
+    # POST authn/identity/finish/
+    # redirect_state = quote_plus(json.dumps({""))
+    redirect_state = f"%7B%22returnUrl%22%3A%22{quote_plus(PODME_AUTH_RETURN_URL)}%22%7D"
+    redirect_qs = f"code=testCode&state={redirect_state}"
+    aresponses.add(
+        URL(PODME_AUTH_BASE_URL).host,
+        "/authn/identity/finish/",
+        "POST",
+        aresponses.Response(
+            status=302,
+            headers={
+                "Location": f"{PODME_BASE_URL}/auth/handleSchibstedLogin?{redirect_qs}",
+            },
+        ),
+        repeat=float("inf"),
+    )
+
+    # GET https://podme.com/auth/handleSchibstedLogin
+    default_credentials_json = credentials.to_json()
+    mock_response = aresponses.Response(
+        status=307,
+        headers={
+            "Location": PODME_AUTH_RETURN_URL,
+        },
+    )
+    mock_response.set_cookie("jwt-cred", default_credentials_json)
+    aresponses.add(
+        URL(PODME_BASE_URL).host,
+        "/auth/handleSchibstedLogin",
+        "GET",
+        mock_response,
+        repeat=float("inf"),
+    )
+
+    aresponses.add(
+        URL(PODME_AUTH_RETURN_URL).host,
+        URL(PODME_AUTH_RETURN_URL).path,
+        "GET",
+        aresponses.Response(
+            body=auth_flow["final_html"],
+        ),
+        repeat=float("inf"),
+    )

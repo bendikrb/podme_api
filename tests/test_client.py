@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from base64 import b64decode
 from datetime import time
 import logging
+from pathlib import Path
+import tempfile
 from unittest.mock import AsyncMock
 
 import aiohttp
@@ -13,7 +16,7 @@ from aresponses import ResponsesMockServer
 import pytest
 from yarl import URL
 
-from podme_api import PodMeClient, PodMeDefaultAuthClient
+from podme_api import PodMeClient, PodMeDefaultAuthClient, SchibstedCredentials
 from podme_api.const import PODME_API_URL
 from podme_api.exceptions import (
     PodMeApiConnectionError,
@@ -21,6 +24,7 @@ from podme_api.exceptions import (
     PodMeApiError,
     PodMeApiNotFoundError,
     PodMeApiRateLimitError,
+    PodMeApiUnauthorizedError,
 )
 from podme_api.models import (
     PodMeCategory,
@@ -35,7 +39,7 @@ from podme_api.models import (
     PodMeSubscriptionPlan,
 )
 
-from .helpers import CustomRoute, load_fixture_json
+from .helpers import CustomRoute, load_fixture_json, setup_auth_mocks
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -59,6 +63,46 @@ async def test_username(aresponses: ResponsesMockServer, podme_client, default_c
     async with podme_client(credentials=default_credentials, load_default_user_credentials=True) as client:
         result = await client.get_username()
         assert result == user_credentials.email
+
+
+async def test_credentials_storage(
+    aresponses: ResponsesMockServer,
+    podme_client,
+    default_credentials,
+    user_credentials,
+):
+    aresponses.add(
+        URL(PODME_API_URL).host,
+        f"{PODME_API_PATH}/user",
+        "GET",
+        Response(body=user_credentials.email),
+        repeat=float("inf"),
+    )
+    with tempfile.TemporaryDirectory(delete=False) as tempdir:
+        async with podme_client(
+            credentials=default_credentials,
+            load_default_user_credentials=True,
+            conf_dir=tempdir,
+        ) as client:
+            result = await client.get_username()
+            assert result == user_credentials.email
+            await client.save_credentials()
+            assert client.auth_client.get_credentials() == default_credentials.to_dict()
+
+            creds_file = Path(tempdir) / "credentials.json"
+            assert creds_file.is_file()
+            stored_credentials = SchibstedCredentials.from_json(creds_file.read_text(encoding="utf-8"))
+            assert stored_credentials == default_credentials
+
+        async with podme_client(
+            load_default_user_credentials=False,
+            conf_dir=tempdir,
+        ) as client:
+            client: PodMeClient
+            assert client.auth_client.get_credentials() == default_credentials.to_dict()
+
+            result = await client.get_username()
+            assert result == "testuser@example.com"
 
 
 async def test_get_user_subscription(aresponses: ResponsesMockServer, podme_client):
@@ -215,13 +259,16 @@ async def test_get_category_nonexistent(aresponses: ResponsesMockServer, podme_c
 
 
 @pytest.mark.parametrize(
-    ("region_name", "category_key"),
+    ("region_name", "category"),
     [
         ("NO", "comedy"),
+        ("NO", PodMeCategory(8, "Komedi", "comedy", None)),
     ],
 )
-async def test_get_category_page(aresponses: ResponsesMockServer, podme_client, region_name, category_key):
+async def test_get_category_page(aresponses: ResponsesMockServer, podme_client, region_name, category):
     region = PodMeRegion[region_name]
+    category_key = category.key if isinstance(category, PodMeCategory) else category
+
     fixture = load_fixture_json(f"cms_categories-page_{region.name}_{category_key.upper()}")
     aresponses.add(
         URL(PODME_API_URL).host,
@@ -239,7 +286,7 @@ async def test_get_category_page(aresponses: ResponsesMockServer, podme_client, 
 
     async with podme_client() as client:
         client: PodMeClient
-        result = await client.get_category_page(category_key, region)
+        result = await client.get_category_page(category, region)
         assert isinstance(result, PodMeCategoryPage)
 
 
@@ -528,6 +575,112 @@ async def test_get_home_screen(aresponses: ResponsesMockServer, podme_client):
         assert isinstance(result, PodMeHomeScreen)
 
 
+async def test_resolve_stream_url(aresponses: ResponsesMockServer, podme_client):
+    episodes_fixture = load_fixture_json("episode_currentlyplaying")
+    aresponses.add(
+        route=CustomRoute(
+            host_pattern=URL(PODME_API_URL).host,
+            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_qs={"page": 0},
+            method_pattern="GET",
+        ),
+        response=json_response(data=episodes_fixture),
+    )
+    aresponses.add(
+        route=CustomRoute(
+            host_pattern=URL(PODME_API_URL).host,
+            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_qs={"page": 1},
+            method_pattern="GET",
+        ),
+        response=json_response(data=[]),
+    )
+    m3u8_fixture = load_fixture_json("stream_m3u8")
+    mp3_fixture = load_fixture_json("stream_mp3")
+    for episode_fixture in episodes_fixture:
+        stream_url = URL(episode_fixture["streamUrl"])
+        if "m3u8" in stream_url.path:
+            aresponses.add(
+                stream_url.host,
+                stream_url.path,
+                "GET",
+                aresponses.Response(
+                    body=m3u8_fixture["master.m3u8"],
+                    headers={"Content-Type": "application/x-mpegURL"},
+                ),
+            )
+            aresponses.add(
+                stream_url.host,
+                stream_url.with_name("audio_128_pkg.m3u8").path,
+                "GET",
+                aresponses.Response(
+                    body=m3u8_fixture["audio_128_pkg.m3u8"],
+                    headers={"Content-Type": "application/x-mpegURL"},
+                ),
+            )
+            aresponses.add(
+                stream_url.host,
+                stream_url.with_name("audio_128_pkg.mp4").path,
+                "HEAD",
+                aresponses.Response(
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Content-Type": "video/mp4",
+                        "Content-Length": "42422273",
+                    },
+                ),
+            )
+            aresponses.add(
+                stream_url.host,
+                stream_url.with_name("audio_128_pkg.mp4").path,
+                "GET",
+                aresponses.Response(
+                    body=b64decode(m3u8_fixture["audio_128_pkg.mp4"]),
+                    headers={"Content-Type": "video/mp4"},
+                ),
+            )
+        else:
+            aresponses.add(
+                stream_url.host,
+                stream_url.path,
+                "HEAD",
+                aresponses.Response(
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Content-Type": "audio/mpeg",
+                        "Content-Length": "2681463",
+                    },
+                ),
+            )
+            aresponses.add(
+                stream_url.host,
+                stream_url.path,
+                "GET",
+                aresponses.Response(
+                    body=b64decode(mp3_fixture["normal.mp3"]),
+                    headers={"Content-Type": "audio/mpeg"},
+                ),
+            )
+
+    async with podme_client() as client:
+        client: PodMeClient
+        on_deck = await client.get_currently_playing()
+        results = await client.get_episode_download_url_bulk(on_deck)
+        assert isinstance(results, list)
+        assert len(results) == len(on_deck)
+
+        with tempfile.TemporaryDirectory() as d:
+            dir_path = Path(d)
+
+            def get_file_ending(url: URL) -> str:
+                return url.name.rsplit(".").pop()
+
+            download_infos = [
+                (url, dir_path / f"{episode_id}.{get_file_ending(url)}") for episode_id, url in results
+            ]
+            await client.download_files(download_infos)
+
+
 async def test_no_content(aresponses: ResponsesMockServer, podme_client):
     """Test HTTP 201 response handling."""
     aresponses.add(
@@ -576,6 +729,44 @@ async def test_http_error400(aresponses: ResponsesMockServer, podme_client):
         client: PodMeClient
         with pytest.raises(PodMeApiError):
             assert await client._request("user")
+
+
+async def test_http_error401(aresponses: ResponsesMockServer, podme_client, default_credentials):
+    """Test HTTP 401 response handling."""
+    # setup_auth_mocks(aresponses, default_credentials)
+    aresponses.add(
+        URL(PODME_API_URL).host,
+        f"{PODME_API_PATH}/user",
+        "GET",
+        aresponses.Response(status=401),
+    )
+    async with podme_client() as client:
+        client: PodMeClient
+        with pytest.raises(PodMeApiUnauthorizedError):
+            assert await client._request("user")
+
+
+async def test_http_error401_with_retry(
+    aresponses: ResponsesMockServer, podme_client, default_credentials, user_credentials
+):
+    """Test HTTP 401 with successful retry."""
+    setup_auth_mocks(aresponses, default_credentials)
+    aresponses.add(
+        URL(PODME_API_URL).host,
+        f"{PODME_API_PATH}/user",
+        "GET",
+        aresponses.Response(status=401),
+    )
+    aresponses.add(
+        URL(PODME_API_URL).host,
+        f"{PODME_API_PATH}/user",
+        "GET",
+        Response(body=user_credentials.email),
+    )
+    async with podme_client(load_default_user_credentials=True) as client:
+        client: PodMeClient
+        # with pytest.raises(PodMeApiUnauthorizedError):
+        assert await client._request("user")
 
 
 async def test_http_error404(aresponses: ResponsesMockServer, podme_client):

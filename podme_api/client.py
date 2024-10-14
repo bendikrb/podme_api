@@ -90,6 +90,15 @@ class PodMeClient:
         PodMeRegion.FI,
     ]
 
+    def set_conf_dir(self, conf_dir: PathLike | str) -> None:
+        """Set the configuration directory.
+
+        Args:
+            conf_dir (PathLike | str): The path to the configuration directory.
+
+        """
+        self._conf_dir = Path(conf_dir).resolve()
+
     async def save_credentials(self, filename: PathLike | None = None) -> None:
         """Save the current authentication credentials to a file.
 
@@ -119,7 +128,8 @@ class PodMeClient:
         if filename is None:
             filename = Path(self._conf_dir) / "credentials.json"
         filename = Path(filename).resolve()
-        if not filename.exists():  # pragma: no cover
+        if not filename.exists():
+            _LOGGER.warning("Credentials file does not exist: <%s>", filename)
             return
         async with aiofiles.open(filename) as f:
             data = await f.read()
@@ -130,6 +140,7 @@ class PodMeClient:
         self,
         uri: str,
         method: str = METH_GET,
+        retry: int = 0,
         **kwargs,
     ) -> str | dict | list | bool | None:
         """Make a request to the PodMe API.
@@ -137,6 +148,7 @@ class PodMeClient:
         Args:
             uri (str): The URI for the API endpoint.
             method (str): The HTTP method to use for the request.
+            retry (int): The number of retries for the request.
             **kwargs: Additional keyword arguments for the request.
                 May include:
                 - params (dict): Query parameters for the request.
@@ -201,7 +213,11 @@ class PodMeClient:
             if response.status == HTTPStatus.BAD_REQUEST:
                 raise PodMeApiError("Bad request syntax or unsupported method")
             if response.status == HTTPStatus.UNAUTHORIZED:
-                if self.auth_client.get_credentials() is None:
+                if (
+                    self.auth_client.get_credentials() is None
+                    or self.auth_client.user_credentials is None
+                    or retry > 0
+                ):
                     raise PodMeApiUnauthorizedError(
                         "Unauthorized access to the PodMe API. Please check your login credentials.",
                     )
@@ -209,7 +225,7 @@ class PodMeClient:
                     "Request to <%s> resulted in status 401. Retrying after invalidating credentials.", url
                 )
                 self.auth_client.invalidate_credentials()
-                return await self._request(uri, method, **kwargs)
+                return await self._request(uri, method, retry=retry + 1, **kwargs)
 
             if content_type.startswith("application/json"):
                 raise PodMeApiError(response.status, json.loads(contents.decode("utf8")))

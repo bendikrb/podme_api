@@ -26,6 +26,7 @@ async def podme_client(default_credentials, user_credentials):
         credentials: SchibstedCredentials | None = None,
         load_default_credentials: bool = True,
         load_default_user_credentials: bool = False,
+        conf_dir: str | None = None,
     ) -> PodMeClient:
         user_creds = user_credentials if load_default_user_credentials is True else None
         auth_client = PodMeDefaultAuthClient(user_credentials=user_creds)
@@ -33,7 +34,11 @@ async def podme_client(default_credentials, user_credentials):
             auth_client.set_credentials(credentials)
         elif load_default_credentials:
             auth_client.set_credentials(default_credentials)
-        client = PodMeClient(auth_client=auth_client, disable_credentials_storage=True)
+        disable_credentials_storage = conf_dir is None
+        client = PodMeClient(auth_client=auth_client, disable_credentials_storage=disable_credentials_storage)
+        if conf_dir is not None:
+            _LOGGER.info("Setting configuration directory to <%s>", conf_dir)
+            client.set_conf_dir(conf_dir)
         try:
             await client.__aenter__()
             yield client
@@ -87,6 +92,13 @@ def default_credentials():
 def expired_credentials():
     data = load_fixture_json("default_credentials")
     data["expiration_time"] = int(datetime.now(tz=timezone.utc).timestamp() - 1)
+    return SchibstedCredentials.from_dict(data)
+
+
+@pytest.fixture
+def invalid_credentials():
+    data = load_fixture_json("default_credentials")
+    data["access_token"] = data["access_token"] + "_refreshed"
     return SchibstedCredentials.from_dict(data)
 
 
