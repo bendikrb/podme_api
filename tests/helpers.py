@@ -305,6 +305,23 @@ def setup_stream_mocks(
                 repeat=2,
             )
         else:
+            redirect_url = stream_url.with_name(f"redir_{stream_url.name}")
+            resp = {
+                "status": 302,
+                "headers": {
+                    "Location": str(redirect_url),
+                },
+            }
+            if head_request_error:
+                resp = {"status": 404}
+            aresponses.add(
+                stream_url.host,
+                stream_url.path,
+                "HEAD",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
+
             resp = {
                 "headers": {
                     "Accept-Ranges": "bytes",
@@ -312,13 +329,26 @@ def setup_stream_mocks(
                     "Content-Length": str(len(files["normal.mp3"])),
                 }
             }
-            if head_request_error:
-                resp = {"status": 404}
+            aresponses.add(
+                redirect_url.host,
+                redirect_url.path,
+                "HEAD",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
 
+            resp = {
+                "status": 302,
+                "headers": {
+                    "Location": str(redirect_url),
+                },
+            }
+            if get_request_error:
+                resp = {"status": 500}
             aresponses.add(
                 stream_url.host,
                 stream_url.path,
-                "HEAD",
+                "GET",
                 aresponses.Response(**resp),
                 repeat=2,
             )
@@ -330,11 +360,9 @@ def setup_stream_mocks(
                     "Content-Length": str(len(files["normal.mp3"])),
                 },
             }
-            if get_request_error:
-                resp = {"status": 500}
             aresponses.add(
-                stream_url.host,
-                stream_url.path,
+                redirect_url.host,
+                redirect_url.path,
                 "GET",
                 aresponses.Response(**resp),
                 repeat=2,

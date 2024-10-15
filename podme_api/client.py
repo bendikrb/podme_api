@@ -819,7 +819,7 @@ class PodMeClient:
         _LOGGER.debug("Checking stream URL: <%s>", stream_url)
 
         # Check if the audio URL is directly downloadable
-        response = await self.session.head(stream_url)
+        response = await self.session.head(stream_url, allow_redirects=True)
         if response.status != HTTPStatus.OK:
             raise PodMeApiStreamUrlError(f"Stream URL is not downloadable: <{stream_url}>")
         content_length = response.headers.get("Content-Length")
