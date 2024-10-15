@@ -5,12 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import IntEnum, StrEnum, auto
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from mashumaro import field_options
 from mashumaro.config import BaseConfig
 from mashumaro.mixins.orjson import DataClassORJSONMixin
 from mashumaro.types import Discriminator
+
+if TYPE_CHECKING:
+    from yarl import URL
 
 
 @dataclass
@@ -418,4 +421,4 @@ class FetchedFileInfo(TypedDict):
 
     content_length: int
     content_type: str | None
-    url: str | None
+    url: URL
