@@ -27,7 +27,6 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
-youtube-dl = "^2021.12.17"
 rich = "^13.9.2"
 platformdirs = "^4.3.6"
 pathlib = "^1.0.1"

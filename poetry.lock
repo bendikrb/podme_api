@@ -2358,17 +2358,6 @@ idna = ">=2.0"
 multidict = ">=4.0"
 propcache = ">=0.2.0"
 
-[[package]]
-name = "youtube-dl"
-version = "2021.12.17"
-description = "YouTube video downloader"
-optional = false
-python-versions = "*"
-files = [
-    {file = "youtube_dl-2021.12.17-py2.py3-none-any.whl", hash = "sha256:f1336d5de68647e0364a47b3c0712578e59ec76f02048ff5c50ef1c69d79cd55"},
-    {file = "youtube_dl-2021.12.17.tar.gz", hash = "sha256:bc59e86c5d15d887ac590454511f08ce2c47698d5a82c27bfe27b5d814bbaed2"},
-]
-
 [extras]
 doc = []
 test = []
@@ -2376,4 +2365,4 @@ test = []
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "e807c005187cb72677df8a912069eafab36002789a14c7d1255be25cbb81e097"
+content-hash = "9083426e70abef7157295b78d19b07b48e352c31bf0736aec34d3d74f7c10c74"

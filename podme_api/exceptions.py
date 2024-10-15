@@ -31,3 +31,15 @@ class PodMeApiUnauthorizedError(PodMeApiError):
 
 class PodMeApiDownloadError(PodMeApiError):
     """PodMe download exception."""
+
+
+class PodMeApiStreamUrlError(PodMeApiDownloadError):
+    """PodMe stream_url exception."""
+
+
+class PodMeApiPlaylistUrlNotFoundError(PodMeApiStreamUrlError):
+    """PodMe playlist url not found exception."""
+
+
+class PodMeApiStreamUrlNotFoundError(PodMeApiStreamUrlError):
+    """PodMe stream url not found exception."""

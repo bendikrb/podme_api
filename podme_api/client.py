@@ -11,15 +11,13 @@ import logging
 import math
 from pathlib import Path
 import socket
-from typing import TYPE_CHECKING, Callable, Coroutine, Self, Sequence, TypeVar
+from typing import TYPE_CHECKING, Callable, Self, Sequence, TypeVar
 
 import aiofiles
-from aiohttp.client import ClientError, ClientSession
+from aiohttp.client import ClientError, ClientPayloadError, ClientResponseError, ClientSession
 from aiohttp.hdrs import METH_DELETE, METH_GET, METH_POST
 import platformdirs
 from yarl import URL
-from youtube_dl import YoutubeDL
-from youtube_dl.utils import YoutubeDLError
 
 from podme_api.const import (
     PODME_API_URL,
@@ -30,7 +28,10 @@ from podme_api.exceptions import (
     PodMeApiDownloadError,
     PodMeApiError,
     PodMeApiNotFoundError,
+    PodMeApiPlaylistUrlNotFoundError,
     PodMeApiRateLimitError,
+    PodMeApiStreamUrlError,
+    PodMeApiStreamUrlNotFoundError,
     PodMeApiUnauthorizedError,
 )
 from podme_api.models import (
@@ -111,7 +112,7 @@ class PodMeClient:
             filename = Path(self._conf_dir) / "credentials.json"
         filename = Path(filename).resolve()
         credentials = self.auth_client.get_credentials()
-        if credentials is None:
+        if credentials is None:  # pragma: no cover
             _LOGGER.warning("Tried to save non-existing credentials")
             return
         async with aiofiles.open(filename, "w") as f:
@@ -135,6 +136,12 @@ class PodMeClient:
             data = await f.read()
             if data:
                 self.auth_client.set_credentials(data)
+
+    def _ensure_session(self):
+        if self.session is None:
+            self.session = ClientSession()
+            _LOGGER.debug("New session created.")
+            self._close_session = True
 
     async def _request(  # noqa: C901
         self,
@@ -178,10 +185,7 @@ class PodMeClient:
             method,
             url.with_query(kwargs.get("params")),
         )
-        if self.session is None:
-            self.session = ClientSession()
-            _LOGGER.debug("New session created.")
-            self._close_session = True
+        self._ensure_session()
 
         try:
             async with asyncio.timeout(self.request_timeout):
@@ -307,75 +311,80 @@ class PodMeClient:
 
         return data
 
-    @staticmethod
-    async def download_episode(
-        path: PathLike,
-        url: str,
-        on_progress: Callable[[dict], None] | None = None,
-        on_finished: Callable[[dict], None] | None = None,
-    ) -> bool:
-        """Download an episode.
+    async def download_file(
+        self,
+        download_url: URL | str,
+        path: PathLike | str,
+        on_progress: Callable[[str, int, int], None] | None = None,
+        on_finished: Callable[[str, str], None] | None = None,
+    ) -> None:
+        """Download a file from a given URL and save it to the specified path.
 
         Args:
-            path: The path to save the downloaded episode.
-            url: The URL of the episode to download.
-            on_progress: A callback function to be called when download is in progress.
-            on_finished: A callback function to be called when download is finished.
-
-        Returns:
-            bool: True if download was successful, False otherwise.
+            download_url (URL | str): The URL of the file to download.
+            path (PathLike | str): The local path where the file will be saved.
+            on_progress (Callable[[str, int, int], None], optional):
+                A callback function to report download progress. It should accept
+                the download URL, current size, and total size as arguments.
+            on_finished (Callable[[str, str], None], optional):
+                A callback function to be called when the download is complete.
+                It should accept the download URL and save path as arguments.
 
         Raises:
-            PodMeApiDownloadError: If an error occurred while downloading the episode.
+            PodMeApiDownloadError: If there's an error during the download process.
 
         """
-
-        def _progress_hook(d):
-            if on_finished is not None:
-                on_finished(d)
-
-        progress_hooks = [_progress_hook]
-        if on_progress is not None:
-            progress_hooks.append(on_progress)
-
-        ydl_opts = {
-            "logger": _LOGGER,
-            "progress_hooks": progress_hooks,
-            "outtmpl": str(path),
-            "quiet": True,
-        }
-        loop = asyncio.get_event_loop()
-        with YoutubeDL(ydl_opts) as ydl:
-            try:
-                await loop.run_in_executor(None, ydl.download, [url])
-                return True
-            except YoutubeDLError as err:
-                raise PodMeApiDownloadError(f"youtube-dl failed to harvest from {url} to {path}") from err
-
-    async def download_file(self, download_url: URL | str, path: PathLike) -> None:
-        """Download a file."""
         download_url = URL(download_url)
         save_path = Path(path)
 
-        if self.session is None:
-            self.session = ClientSession()
-            _LOGGER.debug("New session created.")
-            self._close_session = True
+        self._ensure_session()
 
-        resp = await self.session.get(download_url)
-        async with aiofiles.open(save_path, mode="wb") as f:
-            _LOGGER.debug("Starting download of <%s>", download_url)
-            data = await resp.read()
-            _LOGGER.debug("Writing data to <%s>", save_path)
-            await f.write(data)
+        try:
+            resp = await self.session.get(download_url, raise_for_status=True)
+            total_size = int(resp.headers.get("Content-Length", 0))
+            current_size = 0
+            async with aiofiles.open(save_path, mode="wb") as f:
+                _LOGGER.debug("Starting download of <%s>", download_url)
+                async for chunk, _ in resp.content.iter_chunks():
+                    await f.write(chunk)
+                    current_size += len(chunk)
+                    if on_progress:
+                        on_progress(str(download_url), current_size, total_size)
+        except (ClientPayloadError, ClientResponseError) as err:
+            msg = f"Error while downloading {download_url}"
+            raise PodMeApiDownloadError(msg) from err
 
         _LOGGER.debug("Finished download of <%s> to <%s>", download_url, save_path)
+        if on_finished:
+            on_finished(str(download_url), str(save_path))
 
-    async def download_files(self, download_info: list[tuple[URL | str, PathLike]]):
-        """Download multiple files."""
-        return await self._run_concurrent(self.download_file, download_info)
+    async def download_files(
+        self,
+        download_info: list[tuple[URL | str, PathLike]],
+        on_progress: Callable[[str, int, int], None] | None = None,
+        on_finished: Callable[[str, str], None] | None = None,
+    ):
+        """Download multiple files concurrently.
 
-    async def get_episode_download_url(self, episode: PodMeEpisode | int) -> tuple[int, URL] | None:
+        Args:
+            download_info (list[tuple[URL | str, Path | str]]): A list of tuples containing
+                the download URL and save path for each file.
+            on_progress (Callable[[str, int, int], None], optional):
+                A callback function to report download progress. It should accept
+                the download URL, current size, and total size as arguments.
+            on_finished (Callable[[str, str], None], optional):
+                A callback function to be called when the download is complete.
+                It should accept the download URL and save path as arguments.
+
+        """
+        return await self._run_concurrent(
+            self.download_file,
+            download_info,
+            on_progress=on_progress,
+            on_finished=on_finished,
+        )
+
+    async def get_episode_download_url(self, episode: PodMeEpisode | int) -> tuple[int, URL]:
         """Get the download URL for an episode.
 
         Args:
@@ -384,24 +393,51 @@ class PodMeClient:
         Returns:
             tuple[int, URL]: The episode ID and the download URL.
 
+        Raises:
+            PodMeApiStreamUrlError: If unable to find url from m3u8, or if the url isn't downloadable.
+
         """
         episode_data = episode
         if isinstance(episode_data, int):
             episode_data = await self.get_episode_info(episode)
         if episode_data.stream_url is None:
-            _LOGGER.warning("No stream URL found for episode <%s>", episode_data.id)
-            return None
+            raise PodMeApiStreamUrlError(f"No stream URL found for episode {episode_data.id}")
         info = await self.resolve_stream_url(URL(episode_data.stream_url))
-        if info is None:
-            return None
         return episode_data.id, URL(info["url"])
 
     async def get_episode_download_url_bulk(
         self,
         episodes: list[PodMeEpisode | int],
-    ) -> list[Coroutine[any, any, tuple[int, URL] | None]]:
-        """Get the download URL for a list of episodes."""
-        return await self._run_concurrent(self.get_episode_download_url, episodes)
+    ) -> list[tuple[int, URL]]:
+        """Get download URLs for a list of episodes.
+
+        This method fetches download URLs for multiple episodes concurrently and
+        ensures that only unique episode IDs are included in the result.
+
+        Args:
+            episodes (list[PodMeEpisode | int]): A list of PodMeEpisode objects
+                or episode IDs for which to fetch download URLs.
+
+        Returns:
+            list[tuple[int, URL]]: A list of tuples, each containing an episode ID
+            and its corresponding download URL. Duplicate episode IDs are removed.
+
+        Raises:
+            PodMeApiStreamUrlError: If unable to find url from m3u8, or if the url isn't downloadable.
+
+        """
+
+        def filter_unique_ids(urls_list):
+            seen = set()
+            ret = []
+            for item in urls_list:
+                if item[0] not in seen:
+                    seen.add(item[0])
+                    ret.append(item)
+            return ret
+
+        result = await self._run_concurrent(self.get_episode_download_url, episodes)
+        return filter_unique_ids(result)
 
     async def get_username(self) -> str:
         """Get the username of the authenticated user."""
@@ -776,10 +812,7 @@ class PodMeClient:
             The content length and content type if the URL is downloadable, None otherwise.
 
         """
-        if self.session is None:
-            self.session = ClientSession()
-            _LOGGER.debug("New session created.")
-            self._close_session = True
+        self._ensure_session()
 
         stream_url = URL(stream_url)
 
@@ -788,8 +821,7 @@ class PodMeClient:
         # Check if the audio URL is directly downloadable
         response = await self.session.head(stream_url)
         if response.status != HTTPStatus.OK:
-            _LOGGER.warning("Stream URL is not downloadable: <%s>", stream_url)
-            return None
+            raise PodMeApiStreamUrlError(f"Stream URL is not downloadable: <{stream_url}>")
         content_length = response.headers.get("Content-Length")
         content_type = response.headers.get("Content-Type")
 
@@ -810,21 +842,16 @@ class PodMeClient:
         Returns:
             The content length and content type if the URL is downloadable, None otherwise.
 
+        Raises:
+            PodMeApiStreamUrlError: If unable to find url from m3u8, or if the url isn't downloadable.
+
         """
-
-        if self.session is None:
-            self.session = ClientSession()
-            _LOGGER.debug("New session created.")
-            self._close_session = True
-
         stream_url = URL(stream_url)
-
         if "m3u8" in str(stream_url):
             return await self._resolve_m3u8_url(stream_url)
-
         return await self.check_stream_url(stream_url)
 
-    async def _resolve_m3u8_url(self, master_url: URL | str) -> FetchedFileInfo | None:
+    async def _resolve_m3u8_url(self, master_url: URL | str) -> FetchedFileInfo:
         """Resolve a master.m3u8 URL to an audio segment URL.
 
         Args:
@@ -834,12 +861,7 @@ class PodMeClient:
             The content length and content type if the URL is downloadable, None otherwise.
 
         """
-
-        if self.session is None:
-            self.session = ClientSession()
-            _LOGGER.debug("New session created.")
-            self._close_session = True
-
+        self._ensure_session()
         master_url = URL(master_url)
 
         _LOGGER.debug("Resolving m3u8 URL: <%s>", master_url)
@@ -856,8 +878,7 @@ class PodMeClient:
                 break
 
         if audio_playlist_url is None:
-            _LOGGER.warning("Could not find audio playlist URL in <%s>", master_url)
-            return None
+            raise PodMeApiPlaylistUrlNotFoundError(f"Could not find audio playlist URL in <{master_url}>")
 
         # Fetch audio playlist
         response = await self.session.get(audio_playlist_url)
@@ -873,15 +894,31 @@ class PodMeClient:
                 break
 
         if not audio_segment_url:
-            _LOGGER.warning("Could not find audio segment URL in audio playlist")
-            return None
+            raise PodMeApiStreamUrlNotFoundError(
+                f"Could not find audio segment URL in audio playlist: <{audio_playlist_url}>"
+            )
 
         return await self.check_stream_url(audio_segment_url)
 
     @staticmethod
-    async def _run_concurrent(func: Callable[..., T], args_list: Sequence[any]) -> list[T]:
-        """Run multiple requests concurrently."""
-        tasks = [func(*args) if isinstance(args, tuple) else func(args) for args in args_list]
+    async def _run_concurrent(
+        func: Callable[..., T],
+        args_list: Sequence[any],
+        **kwargs: any,
+    ) -> list[T]:
+        """Run multiple asynchronous tasks concurrently.
+
+        Args:
+            func (Callable[..., T]): The asynchronous function to be executed for each task.
+            args_list (Sequence[any]): A sequence of arguments or argument tuples to be
+                passed to the function for each task.
+            **kwargs: Additional keyword arguments to be passed to the function for all tasks.
+
+        Returns:
+            list[T]: A list of results from the executed tasks.
+
+        """
+        tasks = [func(*args, **kwargs) if isinstance(args, tuple) else func(args) for args in args_list]
         return await asyncio.gather(*tasks)
 
     async def close(self) -> None:
