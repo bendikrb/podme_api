@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import b64decode
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
@@ -13,11 +14,12 @@ from aresponses.utils import ANY, _text_matches_pattern
 import orjson
 from yarl import URL
 
-from podme_api.const import PODME_AUTH_BASE_URL, PODME_AUTH_RETURN_URL, PODME_BASE_URL
+from podme_api.const import PODME_API_URL, PODME_AUTH_BASE_URL, PODME_AUTH_RETURN_URL, PODME_BASE_URL
 
 if TYPE_CHECKING:
     from podme_api import SchibstedCredentials
 
+PODME_API_PATH = URL(PODME_API_URL).path
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
@@ -195,3 +197,153 @@ def setup_auth_mocks(aresponses: ResponsesMockServer, credentials: SchibstedCred
         ),
         repeat=float("inf"),
     )
+
+
+def setup_stream_mocks(
+    aresponses: ResponsesMockServer,
+    episodes_fixture,
+    no_stream_urls=False,
+    no_playlist_urls=False,
+    no_segment_urls=False,
+    head_request_error=False,
+    get_request_error=False,
+):
+    if no_stream_urls:
+        episodes_fixture = [
+            {k: v for k, v in ep.items() if k not in ["streamUrl"]} for ep in episodes_fixture
+        ]
+
+    aresponses.add(
+        route=CustomRoute(
+            host_pattern=URL(PODME_API_URL).host,
+            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_qs={"page": 0},
+            method_pattern="GET",
+        ),
+        response=json_response(data=episodes_fixture),
+    )
+    aresponses.add(
+        route=CustomRoute(
+            host_pattern=URL(PODME_API_URL).host,
+            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_qs={"page": 1},
+            method_pattern="GET",
+        ),
+        response=json_response(data=[]),
+    )
+    m3u8_fixture = load_fixture_json("stream_m3u8")
+    mp3_fixture = load_fixture_json("stream_mp3")
+    files = {
+        "audio_128_pkg.mp4": b64decode(m3u8_fixture["audio_128_pkg.mp4"]),
+        "normal.mp3": b64decode(mp3_fixture["normal.mp3"]),
+    }
+
+    for episode_fixture in episodes_fixture:
+        stream_url = URL(episode_fixture.get("streamUrl", ""))
+        if "m3u8" in stream_url.path:
+            resp = {
+                "body": m3u8_fixture["master.m3u8"],
+                "headers": {"Content-Type": "application/x-mpegURL"},
+            }
+            if no_playlist_urls:
+                resp["body"] = "#EXTM3U\n#EXT-X-VERSION:7\n"
+            aresponses.add(
+                stream_url.host,
+                stream_url.path,
+                "GET",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
+
+            resp = {
+                "body": m3u8_fixture["audio_128_pkg.m3u8"],
+                "headers": {"Content-Type": "application/x-mpegURL"},
+            }
+            if no_segment_urls:
+                resp = {"status": 404}
+
+            aresponses.add(
+                stream_url.host,
+                stream_url.with_name("audio_128_pkg.m3u8").path,
+                "GET",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
+
+            resp = {
+                "headers": {
+                    "Accept-Ranges": "bytes",
+                    "Content-Type": "video/mp4",
+                    "Content-Length": str(len(files["audio_128_pkg.mp4"])),
+                }
+            }
+
+            if head_request_error:
+                resp = {"status": 404}
+            aresponses.add(
+                stream_url.host,
+                stream_url.with_name("audio_128_pkg.mp4").path,
+                "HEAD",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
+
+            resp = {
+                "body": files["audio_128_pkg.mp4"],
+                "headers": {
+                    "Content-Type": "video/mp4",
+                    "Content-Length": str(len(files["audio_128_pkg.mp4"])),
+                },
+            }
+            if get_request_error:
+                resp = {"status": 500}
+            aresponses.add(
+                stream_url.host,
+                stream_url.with_name("audio_128_pkg.mp4").path,
+                "GET",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
+        else:
+            resp = {
+                "headers": {
+                    "Accept-Ranges": "bytes",
+                    "Content-Type": "audio/mpeg",
+                    "Content-Length": str(len(files["normal.mp3"])),
+                }
+            }
+            if head_request_error:
+                resp = {"status": 404}
+
+            aresponses.add(
+                stream_url.host,
+                stream_url.path,
+                "HEAD",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
+
+            resp = {
+                "body": files["normal.mp3"],
+                "headers": {
+                    "Content-Type": "audio/mpeg",
+                    "Content-Length": str(len(files["normal.mp3"])),
+                },
+            }
+            if get_request_error:
+                resp = {"status": 500}
+            aresponses.add(
+                stream_url.host,
+                stream_url.path,
+                "GET",
+                aresponses.Response(**resp),
+                repeat=2,
+            )
+
+        # Add response for episode info
+        aresponses.add(
+            URL(PODME_API_URL).host,
+            f"{PODME_API_PATH}/episode/{episode_fixture["id"]}",
+            "GET",
+            json_response(data=episode_fixture),
+        )

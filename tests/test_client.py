@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from base64 import b64decode
 from datetime import time
 import logging
 from pathlib import Path
 import tempfile
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call
 
 import aiohttp
 from aiohttp.web_response import Response, json_response
@@ -21,9 +20,13 @@ from podme_api.const import PODME_API_URL
 from podme_api.exceptions import (
     PodMeApiConnectionError,
     PodMeApiConnectionTimeoutError,
+    PodMeApiDownloadError,
     PodMeApiError,
     PodMeApiNotFoundError,
+    PodMeApiPlaylistUrlNotFoundError,
     PodMeApiRateLimitError,
+    PodMeApiStreamUrlError,
+    PodMeApiStreamUrlNotFoundError,
     PodMeApiUnauthorizedError,
 )
 from podme_api.models import (
@@ -39,12 +42,16 @@ from podme_api.models import (
     PodMeSubscriptionPlan,
 )
 
-from .helpers import CustomRoute, load_fixture_json, setup_auth_mocks
+from .helpers import (
+    PODME_API_PATH,
+    CustomRoute,
+    load_fixture_json,
+    setup_auth_mocks,
+    setup_stream_mocks,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
-
-PODME_API_PATH = URL(PODME_API_URL).path
 
 
 def test_version():
@@ -146,6 +153,22 @@ async def test_get_user_podcasts(aresponses: ResponsesMockServer, podme_client):
         result = await client.get_user_podcasts()
         assert len(result) == 2
         assert all(isinstance(r, PodMePodcast) for r in result)
+
+
+async def test_get_user_podcasts_error(aresponses: ResponsesMockServer, podme_client):
+    aresponses.add(
+        route=CustomRoute(
+            host_pattern=URL(PODME_API_URL).host,
+            path_pattern=f"{PODME_API_PATH}/podcast/userpodcasts",
+            path_qs={"page": 0},
+            method_pattern="GET",
+        ),
+        response=aresponses.Response(status=500),
+    )
+    async with podme_client() as client:
+        client: PodMeClient
+        with pytest.raises(PodMeApiError):
+            await client.get_user_podcasts()
 
 
 async def test_get_currently_playing(aresponses: ResponsesMockServer, podme_client):
@@ -457,12 +480,18 @@ async def test_get_episode_info(aresponses: ResponsesMockServer, podme_client, e
         f"{PODME_API_PATH}/episode/{episode_id}",
         "GET",
         json_response(data=fixture),
+        repeat=2,
     )
 
     async with podme_client() as client:
         client: PodMeClient
         result = await client.get_episode_info(episode_id)
         assert isinstance(result, PodMeEpisode)
+
+        result = await client.get_episodes_info([episode_id])
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert all(isinstance(r, PodMeEpisode) for r in result)
 
 
 @pytest.mark.parametrize(
@@ -575,93 +604,92 @@ async def test_get_home_screen(aresponses: ResponsesMockServer, podme_client):
         assert isinstance(result, PodMeHomeScreen)
 
 
-async def test_resolve_stream_url(aresponses: ResponsesMockServer, podme_client):
+async def test_download_episode_files(aresponses: ResponsesMockServer, podme_client):
     episodes_fixture = load_fixture_json("episode_currentlyplaying")
-    aresponses.add(
-        route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
-            path_qs={"page": 0},
-            method_pattern="GET",
-        ),
-        response=json_response(data=episodes_fixture),
-    )
-    aresponses.add(
-        route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
-            path_qs={"page": 1},
-            method_pattern="GET",
-        ),
-        response=json_response(data=[]),
-    )
-    m3u8_fixture = load_fixture_json("stream_m3u8")
-    mp3_fixture = load_fixture_json("stream_mp3")
-    for episode_fixture in episodes_fixture:
-        stream_url = URL(episode_fixture["streamUrl"])
-        if "m3u8" in stream_url.path:
-            aresponses.add(
-                stream_url.host,
-                stream_url.path,
-                "GET",
-                aresponses.Response(
-                    body=m3u8_fixture["master.m3u8"],
-                    headers={"Content-Type": "application/x-mpegURL"},
-                ),
-            )
-            aresponses.add(
-                stream_url.host,
-                stream_url.with_name("audio_128_pkg.m3u8").path,
-                "GET",
-                aresponses.Response(
-                    body=m3u8_fixture["audio_128_pkg.m3u8"],
-                    headers={"Content-Type": "application/x-mpegURL"},
-                ),
-            )
-            aresponses.add(
-                stream_url.host,
-                stream_url.with_name("audio_128_pkg.mp4").path,
-                "HEAD",
-                aresponses.Response(
-                    headers={
-                        "Accept-Ranges": "bytes",
-                        "Content-Type": "video/mp4",
-                        "Content-Length": "42422273",
-                    },
-                ),
-            )
-            aresponses.add(
-                stream_url.host,
-                stream_url.with_name("audio_128_pkg.mp4").path,
-                "GET",
-                aresponses.Response(
-                    body=b64decode(m3u8_fixture["audio_128_pkg.mp4"]),
-                    headers={"Content-Type": "video/mp4"},
-                ),
-            )
-        else:
-            aresponses.add(
-                stream_url.host,
-                stream_url.path,
-                "HEAD",
-                aresponses.Response(
-                    headers={
-                        "Accept-Ranges": "bytes",
-                        "Content-Type": "audio/mpeg",
-                        "Content-Length": "2681463",
-                    },
-                ),
-            )
-            aresponses.add(
-                stream_url.host,
-                stream_url.path,
-                "GET",
-                aresponses.Response(
-                    body=b64decode(mp3_fixture["normal.mp3"]),
-                    headers={"Content-Type": "audio/mpeg"},
-                ),
+    setup_stream_mocks(aresponses, episodes_fixture)
+    async with podme_client() as client:
+        client: PodMeClient
+        on_deck = await client.get_currently_playing()
+        results = await client.get_episode_download_url_bulk([*on_deck, on_deck[0].id])
+        assert isinstance(results, list)
+        assert len(results) == len(on_deck)
+
+        with tempfile.TemporaryDirectory() as d:
+            dir_path = Path(d)
+
+            def get_file_ending(url: URL) -> str:
+                return url.name.rsplit(".").pop()
+
+            download_infos = [
+                (url, dir_path / f"{episode_id}.{get_file_ending(url)}") for episode_id, url in results
+            ]
+            on_progress = Mock()
+            on_finished = Mock()
+            await client.download_files(download_infos, on_progress, on_finished)
+
+            # Check progress calls
+            assert on_progress.call_count > 0
+            for args in on_progress.call_args_list:
+                url, current, total = args[0]
+                assert url in [str(u) for u, _ in download_infos]
+                assert 0 <= current <= total
+
+            # Check that the last progress call for each URL has current == total
+            last_calls = on_progress.call_args_list[-2:]
+            for call_args in last_calls:
+                _, current, total = call_args[0]
+                assert current == total
+
+            # Check finished calls
+            assert on_finished.call_count == len(download_infos)
+            on_finished.assert_has_calls(
+                [call(str(url), str(file)) for url, file in download_infos], any_order=True
             )
 
+
+async def test_download_episode_files_no_playlist_error(aresponses: ResponsesMockServer, podme_client):
+    episodes_fixture = load_fixture_json("episode_currentlyplaying")
+    setup_stream_mocks(aresponses, episodes_fixture, no_playlist_urls=True)
+    async with podme_client() as client:
+        client: PodMeClient
+        on_deck = await client.get_currently_playing()
+        with pytest.raises(PodMeApiPlaylistUrlNotFoundError):
+            await client.get_episode_download_url_bulk(on_deck)
+
+
+async def test_download_episode_files_no_segments_error(aresponses: ResponsesMockServer, podme_client):
+    episodes_fixture = load_fixture_json("episode_currentlyplaying")
+    setup_stream_mocks(aresponses, episodes_fixture, no_segment_urls=True)
+    async with podme_client() as client:
+        client: PodMeClient
+        on_deck = await client.get_currently_playing()
+        with pytest.raises(PodMeApiStreamUrlNotFoundError):
+            await client.get_episode_download_url_bulk(on_deck)
+
+
+async def test_download_episode_files_stream_url_check_error(aresponses: ResponsesMockServer, podme_client):
+    episodes_fixture = load_fixture_json("episode_currentlyplaying")
+    setup_stream_mocks(aresponses, episodes_fixture, head_request_error=True)
+    async with podme_client() as client:
+        client: PodMeClient
+        on_deck = await client.get_currently_playing()
+        with pytest.raises(PodMeApiStreamUrlError):
+            await client.get_episode_download_url_bulk(on_deck)
+
+
+async def test_download_episode_files_no_stream_url_error(aresponses: ResponsesMockServer, podme_client):
+    episodes_fixture = load_fixture_json("episode_currentlyplaying")
+    setup_stream_mocks(aresponses, episodes_fixture, no_stream_urls=True)
+    async with podme_client() as client:
+        client: PodMeClient
+        on_deck = await client.get_currently_playing()
+        with pytest.raises(PodMeApiStreamUrlError):
+            await client.get_episode_download_url_bulk(on_deck)
+
+
+async def test_download_episode_files_stream_url_get_error(aresponses: ResponsesMockServer, podme_client):
+    episodes_fixture = load_fixture_json("episode_currentlyplaying")
+    setup_stream_mocks(aresponses, episodes_fixture, get_request_error=True)
     async with podme_client() as client:
         client: PodMeClient
         on_deck = await client.get_currently_playing()
@@ -678,7 +706,10 @@ async def test_resolve_stream_url(aresponses: ResponsesMockServer, podme_client)
             download_infos = [
                 (url, dir_path / f"{episode_id}.{get_file_ending(url)}") for episode_id, url in results
             ]
-            await client.download_files(download_infos)
+            on_progress = Mock()
+            on_finished = Mock()
+            with pytest.raises(PodMeApiDownloadError):
+                await client.download_files(download_infos, on_progress, on_finished)
 
 
 async def test_no_content(aresponses: ResponsesMockServer, podme_client):
