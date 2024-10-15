@@ -21,6 +21,7 @@ from yarl import URL
 
 from podme_api.const import (
     PODME_API_URL,
+    DEFAULT_REQUEST_TIMEOUT,
 )
 from podme_api.exceptions import (
     PodMeApiConnectionError,
@@ -77,7 +78,7 @@ class PodMeClient:
     region = PodMeRegion.NO
     """(PodMeRegion): The region setting for the client."""
 
-    request_timeout: int = 8
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     """The timeout for API requests in seconds."""
     session: ClientSession | None = None
     """(ClientSession | None): The :class:`aiohttp.ClientSession` to use for API requests."""

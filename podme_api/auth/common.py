@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING, Self
 
-from podme_api.const import TIMEOUT
+from podme_api.const import DEFAULT_REQUEST_TIMEOUT
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession
@@ -30,7 +30,7 @@ class PodMeAuthClient(ABC):
     """(PodMeUserCredentials | None): User authentication credentials."""
     session: ClientSession | None = None
     """(ClientSession | None): The :class:`aiohttp.ClientSession` to use for making requests."""
-    request_timeout: float = TIMEOUT
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT
     """Timeout for API requests in seconds."""
 
     _close_session: bool = False

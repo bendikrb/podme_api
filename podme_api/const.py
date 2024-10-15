@@ -8,6 +8,6 @@ PODME_BASE_URL = "https://podme.com"
 PODME_AUTH_BASE_URL = "https://payment.schibsted.no"
 PODME_AUTH_RETURN_URL = f"{PODME_BASE_URL}/no/oppdag"
 
-TIMEOUT = 10
+DEFAULT_REQUEST_TIMEOUT = 15
 
 LOGGER = logging.getLogger(__package__)
