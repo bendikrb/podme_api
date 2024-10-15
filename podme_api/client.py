@@ -820,14 +820,15 @@ class PodMeClient:
 
         # Check if the audio URL is directly downloadable
         response = await self.session.get(stream_url)
-	# Needed for acast.com, which redirects to an URL containing @ instead of %40.
-        final_stream_url = URL(str(response.url).replace("@", "%40"), encoded=True)
+        # Needed for acast.com, which redirects to an URL containing @ instead of %40.
+        if "@" in response.url.query_string:
+            stream_url = URL(str(response.url).replace("@", "%40"), encoded=True)
+        else:
+            stream_url = response.url
 
-        response = await self.session.head(final_stream_url)
+        response = await self.session.head(stream_url, allow_redirects=True)
         if response.status != HTTPStatus.OK:
-            raise PodMeApiStreamUrlError(
-                f"Stream URL is not downloadable: <{stream_url}> ({final_stream_url})"
-            )
+            raise PodMeApiStreamUrlError(f"Stream URL is not downloadable: <{stream_url}>")
         content_length = response.headers.get("Content-Length")
         content_type = response.headers.get("Content-Type")
 
@@ -836,7 +837,7 @@ class PodMeClient:
         return {
             "content_length": int(content_length),
             "content_type": content_type,
-            "url": final_stream_url,
+            "url": stream_url,
         }
 
     async def resolve_stream_url(self, stream_url: URL | str) -> FetchedFileInfo:

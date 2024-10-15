@@ -252,7 +252,7 @@ def setup_stream_mocks(
                 stream_url.path,
                 "GET",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
 
             resp = {
@@ -267,7 +267,7 @@ def setup_stream_mocks(
                 stream_url.with_name("audio_128_pkg.m3u8").path,
                 "GET",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
 
             resp = {
@@ -285,7 +285,7 @@ def setup_stream_mocks(
                 stream_url.with_name("audio_128_pkg.mp4").path,
                 "HEAD",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
 
             resp = {
@@ -302,7 +302,7 @@ def setup_stream_mocks(
                 stream_url.with_name("audio_128_pkg.mp4").path,
                 "GET",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
         else:
             redirect_url = stream_url.with_name(f"redir_{stream_url.name}")
@@ -312,6 +312,9 @@ def setup_stream_mocks(
                     "Location": str(redirect_url),
                 },
             }
+            if "acast" in redirect_url.path:
+                resp["headers"]["Location"] = f"{redirect_url.with_query(None)}?pf=rss&sv=sphinx%401.221.1"
+
             if head_request_error:
                 resp = {"status": 404}
             aresponses.add(
@@ -319,7 +322,7 @@ def setup_stream_mocks(
                 stream_url.path,
                 "HEAD",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
 
             resp = {
@@ -334,7 +337,7 @@ def setup_stream_mocks(
                 redirect_url.path,
                 "HEAD",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
 
             resp = {
@@ -343,6 +346,9 @@ def setup_stream_mocks(
                     "Location": str(redirect_url),
                 },
             }
+            if "acast" in redirect_url.path:
+                resp["headers"]["Location"] = f"{redirect_url.with_query(None)}?pf=rss&sv=sphinx%401.221.1"
+
             if get_request_error:
                 resp = {"status": 500}
             aresponses.add(
@@ -350,7 +356,7 @@ def setup_stream_mocks(
                 stream_url.path,
                 "GET",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
 
             resp = {
@@ -365,7 +371,7 @@ def setup_stream_mocks(
                 redirect_url.path,
                 "GET",
                 aresponses.Response(**resp),
-                repeat=2,
+                repeat=float("inf"),
             )
 
         # Add response for episode info

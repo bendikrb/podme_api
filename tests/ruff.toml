@@ -15,3 +15,4 @@ lint.extend-ignore = [
 ]
 
 lint.pylint.max-branches = 13
+lint.mccabe.max-complexity = 12
