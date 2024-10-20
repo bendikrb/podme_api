@@ -32,6 +32,8 @@ class PodMeAuthClient(ABC):
     """(ClientSession | None): The :class:`aiohttp.ClientSession` to use for making requests."""
     request_timeout: float = DEFAULT_REQUEST_TIMEOUT
     """Timeout for API requests in seconds."""
+    region: str = "NO"
+    """Region for authentication"""
 
     _close_session: bool = False
     """Flag to determine if the session should be closed."""

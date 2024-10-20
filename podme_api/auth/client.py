@@ -17,8 +17,6 @@ from podme_api.auth.common import PodMeAuthClient
 from podme_api.auth.models import SchibstedCredentials
 from podme_api.auth.utils import get_now_iso, get_uuid, parse_schibsted_auth_html
 from podme_api.const import (
-    PODME_AUTH_BASE_URL,
-    PODME_AUTH_RETURN_URL,
     PODME_AUTH_USER_AGENT,
     PODME_BASE_URL,
 )
@@ -35,7 +33,6 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-CLIENT_ID = "66fd26cdae6bde57ef206b35"
 
 
 @dataclass
@@ -90,6 +87,16 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         if self.credentials is not None:
             self.set_credentials(self.credentials)
 
+        if self.region == "NO":
+            self.CLIENT_ID = "66fd26cdae6bde57ef206b35"
+            self.BASE_URL = "https://payment.schibsted.no"
+            self.RETURN_URL = f"{PODME_BASE_URL}/no/oppdag"
+
+        if self.region == "SE":
+            self.CLIENT_ID = "66fd141b3f97a8558ace8ab9"
+            self.BASE_URL = "https://login.schibsted.com"
+            self.RETURN_URL = f"{PODME_BASE_URL}/se/upptack"
+
     @property
     def request_header(self) -> dict[str, str]:
         """Generate a header for HTTP requests to the server."""
@@ -128,7 +135,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
 
         """
         if base_url is None:
-            base_url = PODME_AUTH_BASE_URL
+            base_url = self.BASE_URL
         url = URL(base_url).join(URL(uri))
         headers = {
             **self.request_header,
@@ -215,7 +222,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
                 "scope": "openid email",
                 "state": json.dumps(
                     {
-                        "returnUrl": PODME_AUTH_RETURN_URL,
+                        "returnUrl": self.RETURN_URL,
                         "uuid": get_uuid(),
                         "schibstedFlowInitiatedDate": get_now_iso(),
                     }
