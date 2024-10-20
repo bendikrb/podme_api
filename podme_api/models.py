@@ -277,7 +277,7 @@ class PodMeHomeSection(BaseDataClassORJSONMixin):
 class PodMeSearchResult(BaseDataClassORJSONMixin):
     """Represents a search result in PodMe."""
 
-    podcast_id: int = field(metadata=field_options(alias="podcastId"))
+    podcast_id: int | str = field(metadata=field_options(alias="podcastId"))
     podcast_title: str = field(metadata=field_options(alias="podcastTitle"))
     image_url: str = field(metadata=field_options(alias="imageUrl"))
     author_full_name: str = field(metadata=field_options(alias="authorFullName"))

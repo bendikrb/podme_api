@@ -14,14 +14,17 @@ import socket
 from typing import TYPE_CHECKING, Callable, Self, Sequence, TypeVar
 
 import aiofiles
+import aiofiles.os
 from aiohttp.client import ClientError, ClientPayloadError, ClientResponseError, ClientSession
 from aiohttp.hdrs import METH_DELETE, METH_GET, METH_POST
+from ffmpeg.asyncio import FFmpeg
+from ffmpeg.errors import FFmpegError
 import platformdirs
 from yarl import URL
 
 from podme_api.const import (
-    PODME_API_URL,
     DEFAULT_REQUEST_TIMEOUT,
+    PODME_API_URL,
 )
 from podme_api.exceptions import (
     PodMeApiConnectionError,
@@ -312,12 +315,64 @@ class PodMeClient:
 
         return data
 
+    async def transcode_file(
+        self,
+        input_file: PathLike | str,
+        output_file: PathLike | str | None = None,
+        transcode_options: dict[str, str] | None = None,
+    ) -> Path:
+        """Remux audio file using ffmpeg.
+
+        This will basically remux the audio file into another container format (version 1 of the MP4
+        Base Media format). Most likely this can be solved in better ways, but this will do for now.
+        If the audio is served to clients in the original container (version 5 as of now), they will
+        be very confused about the total duration of the file, for some reason...
+
+        Args:
+            input_file (PathLike | str): The path to the audio file.
+            output_file (PathLike | str | None): The path to the output file.
+                By default, the output file will be the same as the input file with "_out" appended
+                to the name.
+            transcode_options (dict[str, str] | None): Additional transcode options.
+
+        """
+        input_file = Path(input_file)
+        if not input_file.is_file():
+            raise PodMeApiError("File not found")
+
+        if output_file is None:
+            output_file = input_file.with_stem(f"{input_file.stem}_out")
+
+        transcode_options = transcode_options or {}
+
+        ffmpeg = (
+            FFmpeg()
+            .option("y")
+            .input(input_file.as_posix())
+            .output(
+                output_file.as_posix(),
+                {
+                    "c": "copy",
+                    "map": "0",
+                    "brand": "isomiso2mp41",
+                    **transcode_options,
+                },
+            )
+        )
+        try:
+            await ffmpeg.execute()
+        except FFmpegError as err:
+            _LOGGER.warning("Error occurred while transcoding file: %s", err)
+            return input_file
+        return output_file
+
     async def download_file(
         self,
         download_url: URL | str,
         path: PathLike | str,
         on_progress: Callable[[str, int, int], None] | None = None,
         on_finished: Callable[[str, str], None] | None = None,
+        transcode: bool = True,
     ) -> None:
         """Download a file from a given URL and save it to the specified path.
 
@@ -330,6 +385,7 @@ class PodMeClient:
             on_finished (Callable[[str, str], None], optional):
                 A callback function to be called when the download is complete.
                 It should accept the download URL and save path as arguments.
+            transcode (bool, optional): Whether to transcode the file. Defaults to True.
 
         Raises:
             PodMeApiDownloadError: If there's an error during the download process.
@@ -356,6 +412,13 @@ class PodMeClient:
             raise PodMeApiDownloadError(msg) from err
 
         _LOGGER.debug("Finished download of <%s> to <%s>", download_url, save_path)
+
+        if transcode:
+            new_save_path = await self.transcode_file(save_path)
+            if new_save_path != save_path:
+                _LOGGER.debug("Moving transcoded file %s to %s", new_save_path, save_path)
+                await aiofiles.os.replace(new_save_path, save_path)
+
         if on_finished:
             on_finished(str(download_url), str(save_path))
 
@@ -705,6 +768,16 @@ class PodMeClient:
             f"podcast/slug/{podcast_slug}",
         )
         return PodMePodcast.from_dict(data)
+
+    async def get_podcasts_info(self, podcast_slugs: list[str]) -> list[PodMePodcast]:
+        """Get information about multiple podcasts.
+
+        Args:
+            podcast_slugs (list[str]): The slugs of the podcasts.
+
+        """
+        podcasts = await asyncio.gather(*[self.get_podcast_info(slug) for slug in podcast_slugs])
+        return list(podcasts)
 
     async def get_episode_info(self, episode_id: int) -> PodMeEpisode:
         """Get information about an episode.
