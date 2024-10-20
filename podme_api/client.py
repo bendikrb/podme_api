@@ -361,6 +361,9 @@ class PodMeClient:
         )
         try:
             await ffmpeg.execute()
+        except FileNotFoundError as err:
+            _LOGGER.warning("Error occurred while transcoding file: %s", err)
+            return input_file
         except FFmpegError as err:
             _LOGGER.warning("Error occurred while transcoding file: %s", err)
             return input_file
