@@ -28,6 +28,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: "poetry"
+      - name: 🏗 Set up FFmpeg
+        id: setup-ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
       - name: 🏗 Install workflow dependencies
         run: |
           poetry config virtualenvs.create true

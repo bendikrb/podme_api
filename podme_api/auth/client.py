@@ -322,7 +322,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         """Get the current credentials as a dictionary, or None if not set."""
         if self._credentials is not None:
             return self._credentials.to_dict()
-        return None
+        return None  # pragma: no cover
 
     def set_credentials(self, credentials: SchibstedCredentials | dict | str):
         """Set the credentials.

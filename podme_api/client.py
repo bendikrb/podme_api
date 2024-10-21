@@ -315,8 +315,8 @@ class PodMeClient:
 
         return data
 
+    @staticmethod
     async def transcode_file(
-        self,
         input_file: PathLike | str,
         output_file: PathLike | str | None = None,
         transcode_options: dict[str, str] | None = None,
@@ -340,29 +340,47 @@ class PodMeClient:
         if not input_file.is_file():
             raise PodMeApiError("File not found")
 
-        if output_file is None:
+        if output_file is None:  # pragma: no cover
             output_file = input_file.with_stem(f"{input_file.stem}_out")
 
         transcode_options = transcode_options or {}
 
-        ffmpeg = (
-            FFmpeg()
-            .option("y")
-            .input(input_file.as_posix())
-            .output(
-                output_file.as_posix(),
-                {
-                    "c": "copy",
-                    "map": "0",
-                    "brand": "isomiso2mp41",
-                    **transcode_options,
-                },
-            )
-        )
         try:
+            ffprobe = FFmpeg(executable="ffprobe").input(
+                input_file,
+                print_format="json",
+                show_streams=None,
+            )
+            media = json.loads(await ffprobe.execute())
+
+            codec_name = media["streams"][0]["codec_name"]
+            codec_tag_string = media["streams"][0]["codec_tag_string"]
+            if codec_name == "aac" and codec_tag_string[:3] == "mp4":
+                output_file = output_file.with_suffix(".mp4")
+                transcode_options.update(
+                    {
+                        "codec": "copy",
+                        "map": "0",
+                        "brand": "isomiso2mp41",
+                    }
+                )
+
+            elif codec_name == "mp3":
+                return input_file
+
+            _LOGGER.info("Transcoding file: %s to %s", input_file, output_file)
+            ffmpeg = (
+                FFmpeg()
+                .option("y")
+                .input(input_file)
+                .output(
+                    output_file,
+                    transcode_options,
+                )
+            )
             await ffmpeg.execute()
         except FileNotFoundError as err:
-            _LOGGER.warning("Error occurred while transcoding file: %s", err)
+            _LOGGER.warning("Please install ffmpeg to enable transcoding: %s", err)
             return input_file
         except FFmpegError as err:
             _LOGGER.warning("Error occurred while transcoding file: %s", err)

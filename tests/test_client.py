@@ -459,12 +459,18 @@ async def test_get_podcast_info(aresponses: ResponsesMockServer, podme_client, p
         f"{PODME_API_PATH}/podcast/slug/{podcast_slug}",
         "GET",
         json_response(data=fixture),
+        repeat=2,
     )
 
     async with podme_client() as client:
         client: PodMeClient
         result = await client.get_podcast_info(podcast_slug)
         assert isinstance(result, PodMePodcast)
+
+        results = await client.get_podcasts_info([podcast_slug])
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert all(isinstance(r, PodMePodcast) for r in results)
 
 
 @pytest.mark.parametrize(
@@ -607,6 +613,29 @@ async def test_get_home_screen(aresponses: ResponsesMockServer, podme_client):
 async def test_download_episode_files(aresponses: ResponsesMockServer, podme_client):
     episodes_fixture = load_fixture_json("episode_currentlyplaying")
     setup_stream_mocks(aresponses, episodes_fixture)
+    download_urls = [
+        (e["id"], URL(e["streamUrl"]).with_name("audio_128_pkg.mp4"))
+        for e in episodes_fixture
+        if "m3u8" in e["streamUrl"]
+    ]
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with tempfile.TemporaryDirectory() as d:
+            dir_path = Path(d)
+
+            def get_file_ending(url: URL) -> str:
+                return url.name.rsplit(".").pop()
+
+            download_infos = [
+                (url, dir_path / f"{episode_id}.{get_file_ending(url)}") for episode_id, url in download_urls
+            ]
+            await client.download_files(download_infos)
+
+
+async def test_download_episode_files_with_callbacks(aresponses: ResponsesMockServer, podme_client):
+    episodes_fixture = load_fixture_json("episode_currentlyplaying")
+    setup_stream_mocks(aresponses, episodes_fixture)
     async with podme_client() as client:
         client: PodMeClient
         on_deck = await client.get_currently_playing()
@@ -710,6 +739,29 @@ async def test_download_episode_files_stream_url_get_error(aresponses: Responses
             on_finished = Mock()
             with pytest.raises(PodMeApiDownloadError):
                 await client.download_files(download_infos, on_progress, on_finished)
+
+
+async def test_transcode_file_error(podme_client):
+    non_existing_file = Path("non_existing_file.mp3")
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with pytest.raises(PodMeApiError):
+            await client.transcode_file(non_existing_file)
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3") as f:
+            invalid_file = Path(f.name)
+            await client.transcode_file(invalid_file)
+
+
+async def test_transcode_no_ffmpeg(monkeypatch, podme_client):
+    monkeypatch.setenv("PATH", "")
+    async with podme_client() as client:
+        client: PodMeClient
+        with tempfile.NamedTemporaryFile(suffix=".mp3") as f:
+            input_path = Path(f.name)
+            saved_path = await client.transcode_file(input_path)
+            assert saved_path == input_path
 
 
 async def test_no_content(aresponses: ResponsesMockServer, podme_client):
