@@ -96,13 +96,6 @@ def expired_credentials():
 
 
 @pytest.fixture
-def invalid_credentials():
-    data = load_fixture_json("default_credentials")
-    data["access_token"] = data["access_token"] + "_refreshed"
-    return SchibstedCredentials.from_dict(data)
-
-
-@pytest.fixture
 def refreshed_credentials(default_credentials):
     data = load_fixture_json("default_credentials")
     data["access_token"] = data["access_token"] + "_refreshed"

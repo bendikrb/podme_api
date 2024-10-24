@@ -6,8 +6,9 @@ import asyncio
 from datetime import time
 import logging
 from pathlib import Path
+import socket
 import tempfile
-from unittest.mock import AsyncMock, Mock, call
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import aiohttp
 from aiohttp.web_response import Response, json_response
@@ -110,6 +111,24 @@ async def test_credentials_storage(
 
             result = await client.get_username()
             assert result == "testuser@example.com"
+
+        # Test loading and saving credentials with specified filename
+        async with podme_client(
+            load_default_user_credentials=False,
+            conf_dir=tempdir,
+        ) as client:
+            client: PodMeClient
+            # Loading
+            creds_file = Path(tempdir) / "credentials.json"
+            stored_credentials = SchibstedCredentials.from_json(creds_file.read_text(encoding="utf-8"))
+            await client.load_credentials(creds_file)
+            assert client.auth_client.get_credentials() == stored_credentials.to_dict()
+
+            # Saving
+            creds_file_alt = creds_file.with_name("credentials2")
+            await client.save_credentials(creds_file_alt)
+            stored_credentials = SchibstedCredentials.from_json(creds_file_alt.read_text(encoding="utf-8"))
+            assert client.auth_client.get_credentials() == stored_credentials.to_dict()
 
 
 async def test_get_user_subscription(aresponses: ResponsesMockServer, podme_client):
@@ -894,6 +913,17 @@ async def test_json_error(aresponses: ResponsesMockServer, podme_client):
     async with podme_client() as client:
         client: PodMeClient
         with pytest.raises(PodMeApiError):
+            assert await client._request("user")
+
+
+async def test_network_error(podme_client):
+    """Test network error handling."""
+    async with podme_client() as client:
+        client: PodMeClient
+        client.session = AsyncMock(spec=aiohttp.ClientSession)
+        with patch.object(client.session, "request", side_effect=socket.gaierror), pytest.raises(
+            PodMeApiConnectionError
+        ):
             assert await client._request("user")
 
 

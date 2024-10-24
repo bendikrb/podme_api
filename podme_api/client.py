@@ -202,7 +202,7 @@ class PodMeClient:
             raise PodMeApiConnectionTimeoutError(
                 "Timeout occurred while connecting to the PodMe API"
             ) from exception
-        except (ClientError, socket.gaierror) as exception:  # pragma: no cover
+        except (ClientError, socket.gaierror) as exception:
             raise PodMeApiConnectionError(
                 "Error occurred while communicating with the PodMe API"
             ) from exception
