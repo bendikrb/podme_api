@@ -41,6 +41,7 @@ from podme_api.models import (
     PodMeSearchResult,
     PodMeSubscription,
     PodMeSubscriptionPlan,
+    PodMeDownloadProgressTask,
 )
 
 from .helpers import (
@@ -678,14 +679,15 @@ async def test_download_episode_files_with_callbacks(aresponses: ResponsesMockSe
             # Check progress calls
             assert on_progress.call_count > 0
             for args in on_progress.call_args_list:
-                url, current, total = args[0]
+                task, url, current, total = args[0]
+                assert isinstance(task, PodMeDownloadProgressTask)
                 assert url in [str(u) for u, _ in download_infos]
                 assert 0 <= current <= total
 
             # Check that the last progress call for each URL has current == total
             last_calls = on_progress.call_args_list[-2:]
             for call_args in last_calls:
-                _, current, total = call_args[0]
+                _, _, current, total = call_args[0]
                 assert current == total
 
             # Check finished calls

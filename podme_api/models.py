@@ -65,6 +65,16 @@ class PodMeRegion(IntEnum):
         return PodMeLanguage[self.name]
 
 
+class PodMeDownloadProgressTask(StrEnum):
+    """Enumeration of PodMe download progress tasks."""
+
+    INITIALIZE = auto()
+    RESOLVE_URL = auto()
+    DOWNLOAD_FILE = auto()
+    TRANSCODE_FILE = auto()
+    COMPLETE = auto()
+
+
 @dataclass
 class PodMeCategory(BaseDataClassORJSONMixin):
     """Represents a PodMe category."""

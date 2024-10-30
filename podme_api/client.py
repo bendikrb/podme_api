@@ -41,6 +41,7 @@ from podme_api.exceptions import (
 from podme_api.models import (
     PodMeCategory,
     PodMeCategoryPage,
+    PodMeDownloadProgressTask,
     PodMeEpisode,
     PodMeHomeScreen,
     PodMeLanguage,
@@ -391,7 +392,7 @@ class PodMeClient:
         self,
         download_url: URL | str,
         path: PathLike | str,
-        on_progress: Callable[[str, int, int], None] | None = None,
+        on_progress: Callable[[PodMeDownloadProgressTask, str, int, int], None] | None = None,
         on_finished: Callable[[str, str], None] | None = None,
         transcode: bool = True,
     ) -> None:
@@ -400,9 +401,9 @@ class PodMeClient:
         Args:
             download_url (URL | str): The URL of the file to download.
             path (PathLike | str): The local path where the file will be saved.
-            on_progress (Callable[[str, int, int], None], optional):
+            on_progress (Callable[[PodMeDownloadProgressTask, str, int, int], None], optional):
                 A callback function to report download progress. It should accept
-                the download URL, current size, and total size as arguments.
+                the download URL/path, current and total as arguments (current==total means 100%).
             on_finished (Callable[[str, str], None], optional):
                 A callback function to be called when the download is complete.
                 It should accept the download URL and save path as arguments.
@@ -414,20 +415,26 @@ class PodMeClient:
         """
         download_url = URL(download_url)
         save_path = Path(path)
+        if on_progress is None:
+            on_progress = lambda task, url, current, total: None  # noqa: E731, ARG005
+        if on_finished is None:
+            on_finished = lambda url, _path: None  # noqa: E731, ARG005
 
         self._ensure_session()
 
         try:
             resp = await self.session.get(download_url, raise_for_status=True)
             total_size = int(resp.headers.get("Content-Length", 0))
+            on_progress(PodMeDownloadProgressTask.DOWNLOAD_FILE, str(download_url), 0, total_size)
             current_size = 0
             async with aiofiles.open(save_path, mode="wb") as f:
                 _LOGGER.debug("Starting download of <%s>", download_url)
                 async for chunk, _ in resp.content.iter_chunks():
                     await f.write(chunk)
                     current_size += len(chunk)
-                    if on_progress:
-                        on_progress(str(download_url), current_size, total_size)
+                    on_progress(
+                        PodMeDownloadProgressTask.DOWNLOAD_FILE, str(download_url), current_size, total_size
+                    )
         except (ClientPayloadError, ClientResponseError) as err:
             msg = f"Error while downloading {download_url}"
             raise PodMeApiDownloadError(msg) from err
@@ -435,18 +442,19 @@ class PodMeClient:
         _LOGGER.debug("Finished download of <%s> to <%s>", download_url, save_path)
 
         if transcode:
+            on_progress(PodMeDownloadProgressTask.TRANSCODE_FILE, str(download_url), 0, 100)
             new_save_path = await self.transcode_file(save_path)
             if new_save_path != save_path:
                 _LOGGER.debug("Moving transcoded file %s to %s", new_save_path, save_path)
                 await aiofiles.os.replace(new_save_path, save_path)
+            on_progress(PodMeDownloadProgressTask.TRANSCODE_FILE, str(download_url), 100, 100)
 
-        if on_finished:
-            on_finished(str(download_url), str(save_path))
+        on_finished(str(download_url), str(save_path))
 
     async def download_files(
         self,
         download_info: list[tuple[URL | str, PathLike]],
-        on_progress: Callable[[str, int, int], None] | None = None,
+        on_progress: Callable[[PodMeDownloadProgressTask, str, int, int], None] | None = None,
         on_finished: Callable[[str, str], None] | None = None,
     ):
         """Download multiple files concurrently.
@@ -454,9 +462,9 @@ class PodMeClient:
         Args:
             download_info (list[tuple[URL | str, Path | str]]): A list of tuples containing
                 the download URL and save path for each file.
-            on_progress (Callable[[str, int, int], None], optional):
+            on_progress (Callable[[PodMeDownloadProgressTask, str, int, int], None], optional):
                 A callback function to report download progress. It should accept
-                the download URL, current size, and total size as arguments.
+                the download URL/path, current and total as arguments (current==total means 100%).
             on_finished (Callable[[str, str], None], optional):
                 A callback function to be called when the download is complete.
                 It should accept the download URL and save path as arguments.
