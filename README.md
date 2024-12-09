@@ -2,6 +2,7 @@
 
 [![GitHub Release][releases-shield]][releases]
 [![Python Versions][py-versions-shield]][py-versions]
+[![PyPI Downloads][downloads-shield]][downloads]
 ![Project Maintenance][maintenance-shield]
 [![License][license-shield]](LICENSE)
 ![Made with Love in Norway][madewithlove-shield]
@@ -47,3 +48,5 @@ If you have any questions or need assistance with the library, you can contact t
 [codecov-shield]: https://codecov.io/gh/bendikrb/podme_api/graph/badge.svg?token=IXLJ3WR4ES
 [codecov]: https://codecov.io/gh/bendikrb/podme_api
 [madewithlove-shield]: https://madewithlove.now.sh/no?heart=true&colorB=%233584e4
+[downloads-shield]: https://img.shields.io/pypi/dm/podme-api?style=flat
+[downloads]: https://pypistats.org/packages/podme-api
