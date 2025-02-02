@@ -101,7 +101,6 @@ async def test_get_set_credentials(podme_default_auth_client, default_credential
 
         # Set credentials using a dictionary
         new_creds_dict = default_credentials.to_dict()
-        new_creds_dict["user_id"] = "123456"
         auth_client.set_credentials(new_creds_dict)
         retrieved_new_credentials = auth_client.get_credentials()
         assert retrieved_new_credentials == new_creds_dict

@@ -21,19 +21,11 @@ class SchibstedCredentials(BaseDataClassORJSONMixin):
     """Represents Schibsted authentication credentials."""
 
     scope: str
-    user_id: str
-    is_admin: bool
     token_type: str
     access_token: str
     refresh_token: str
     expires_in: int
     id_token: str
-    server_time: datetime = field(
-        metadata=field_options(
-            deserialize=datetime.fromtimestamp,
-            serialize=lambda v: int(datetime.timestamp(v)),
-        )
-    )
     expiration_time: datetime = field(
         metadata=field_options(
             deserialize=datetime.fromtimestamp,
