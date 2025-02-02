@@ -212,7 +212,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
                 "client_id": CLIENT_ID,
                 "redirect_uri": "https://podme.com/auth/handleSchibstedLogin",
                 "response_type": "code",
-                "scope": "openid email",
+                "scope": "openid email offline_access",
                 "state": json.dumps(
                     {
                         "returnUrl": PODME_AUTH_RETURN_URL,
