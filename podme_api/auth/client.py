@@ -310,8 +310,11 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
                 "state": get_uuid(),
             },
         )
-        credentials = await response.json()
-        self.set_credentials(credentials)
+        refreshed_credentials = await response.json()
+        self.set_credentials(SchibstedCredentials.from_dict({
+            **credentials.to_dict(),
+            **refreshed_credentials,
+        }))
         _LOGGER.debug(f"Refreshed credentials: {self.get_credentials()}")
 
         await self.close()
