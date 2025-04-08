@@ -20,6 +20,7 @@ from rich.table import Table
 
 from podme_api.__version__ import __version__
 from podme_api.auth import PodMeDefaultAuthClient
+from podme_api.auth.mobile_client import PodMeMobileAuthClient
 from podme_api.auth.models import PodMeUserCredentials
 from podme_api.cli.utils import bold_star, is_valid_writable_dir, pretty_dataclass, pretty_dataclass_list
 from podme_api.client import PodMeClient
@@ -136,6 +137,8 @@ async def login(args):
     """Login."""
     async with _get_client(args) as client:
         client.auth_client.invalidate_credentials()
+        client.mobile_auth_client.invalidate_credentials()
+        await client.mobile_auth_client.async_get_access_token()
         username = await client.get_username()
         console.print(f"Logged in as {username}")
 
@@ -406,7 +409,8 @@ async def _get_client(args) -> PodMeClient:
     else:
         user_creds = None
     auth_client = PodMeDefaultAuthClient(user_credentials=user_creds)
-    client = PodMeClient(auth_client=auth_client)
+    mobile_auth_client = PodMeMobileAuthClient(user_credentials=user_creds)
+    client = PodMeClient(auth_client=auth_client, mobile_auth_client=mobile_auth_client)
     try:
         await client.__aenter__()
         yield client

@@ -11,7 +11,7 @@ import logging
 import math
 from pathlib import Path
 import socket
-from typing import TYPE_CHECKING, Callable, Self, Sequence, TypeVar
+from typing import TYPE_CHECKING, Callable, Self, Sequence, TypeVar, Literal, Optional
 
 import aiofiles
 import aiofiles.os
@@ -24,7 +24,7 @@ from yarl import URL
 
 from podme_api.const import (
     DEFAULT_REQUEST_TIMEOUT,
-    PODME_API_URL,
+    PODME_API_URL, PODME_MOBILE_API_URL, PODME_MOBILE_USER_AGENT,
 )
 from podme_api.exceptions import (
     PodMeApiConnectionError,
@@ -74,6 +74,12 @@ class PodMeClient:
     auth_client: PodMeAuthClient
     """auth_client (PodMeAuthClient): The authentication client."""
 
+    mobile_auth_client: PodMeAuthClient
+    """mobile_auth_client (PodMeAuthClient): The mobile API authentication client."""
+
+    user_agent = PODME_MOBILE_USER_AGENT
+    """User agent string for API requests."""
+
     disable_credentials_storage: bool = False
     """Whether to disable credential storage."""
 
@@ -105,42 +111,75 @@ class PodMeClient:
         """
         self._conf_dir = Path(conf_dir).resolve()
 
-    async def save_credentials(self, filename: PathLike | None = None) -> None:
+    def credentials_file_prefix_and_client(self, api_type: Literal["web", "mobile"]):
+        match api_type:
+            case "mobile":
+                return "mobile_", self.mobile_auth_client
+            case _:
+                return "", self.auth_client
+
+    async def save_credentials_to_file(
+        self,
+        api_type: Literal["web", "mobile"],
+        filename: Optional[str] = None
+    ) -> None:
+        """Save credentials for the specified API type."""
+        prefix, client = self.credentials_file_prefix_and_client(api_type)
+        if filename is None:
+            filename = Path(self._conf_dir) / f"{prefix}credentials.json"
+        filename = Path(filename).resolve()
+        credentials = client.get_credentials()
+        if credentials is None:  # pragma: no cover
+            _LOGGER.warning(f"Tried to save non-existing credentials ({api_type})")
+            return
+        async with aiofiles.open(filename, "w") as f:
+            await f.write(json.dumps(credentials))
+
+    async def save_credentials(self, filename: PathLike | None = None, mobile_filename: PathLike | None = None) -> None:
         """Save the current authentication credentials to a file.
 
         Args:
             filename (PathLike | None): The file to save the credentials to.
                 If None, uses the default location.
-
+            mobile_filename (PathLike | None): The file to save the credentials to (mobile API).
+                If None, uses the default location.
         """
-        if filename is None:
-            filename = Path(self._conf_dir) / "credentials.json"
-        filename = Path(filename).resolve()
-        credentials = self.auth_client.get_credentials()
-        if credentials is None:  # pragma: no cover
-            _LOGGER.warning("Tried to save non-existing credentials")
-            return
-        async with aiofiles.open(filename, "w") as f:
-            await f.write(json.dumps(credentials))
+        await self.save_credentials_to_file('web', filename)
+        await self.save_credentials_to_file('mobile', mobile_filename)
 
-    async def load_credentials(self, filename: PathLike | None = None) -> None:
+    async def load_credentials_from_file(
+        self,
+        api_type: Literal["web", "mobile"],
+        filename: Optional[PathLike] = None
+    ) -> None:
+        """Load credentials for the specified API type."""
+        prefix, client = self.credentials_file_prefix_and_client(api_type)
+
+        if filename is None:
+            filename = Path(self._conf_dir) / f"{prefix}credentials.json"
+        filename = Path(filename).resolve()
+
+        if not filename.exists():
+            _LOGGER.warning(
+                f"Credentials file does not exist: <{filename}>{' (mobile)' if api_type == 'mobile' else ''}")
+            return
+
+        async with aiofiles.open(filename) as f:
+            data = await f.read()
+            if data:
+                client.set_credentials(data)
+
+    async def load_credentials(self, filename: PathLike | None = None, mobile_filename: PathLike | None = None) -> None:
         """Load authentication credentials from a file.
 
         Args:
             filename (PathLike | None): The file to load the credentials from.
                 If None, uses the default location.
-
+            mobile_filename (PathLike | None): The file to load the credentials from (mobile API).
+                If None, uses the default location.
         """
-        if filename is None:
-            filename = Path(self._conf_dir) / "credentials.json"
-        filename = Path(filename).resolve()
-        if not filename.exists():
-            _LOGGER.warning("Credentials file does not exist: <%s>", filename)
-            return
-        async with aiofiles.open(filename) as f:
-            data = await f.read()
-            if data:
-                self.auth_client.set_credentials(data)
+        await self.load_credentials_from_file('web', filename)
+        await self.load_credentials_from_file('mobile', mobile_filename)
 
     def _ensure_session(self):
         if self.session is None:
@@ -153,6 +192,7 @@ class PodMeClient:
         uri: str,
         method: str = METH_GET,
         retry: int = 0,
+        api: Literal["web", "mobile"] = "web",
         **kwargs,
     ) -> str | dict | list | bool | None:
         """Make a request to the PodMe API.
@@ -171,9 +211,16 @@ class PodMeClient:
             The response data from the API.
 
         """
-        url = URL(f"{PODME_API_URL.strip('/')}/").join(URL(uri))
+        match api:
+            case "mobile":
+                base_url = PODME_MOBILE_API_URL
+                access_token = await self.mobile_auth_client.async_get_access_token()
+            case _:
+                base_url = PODME_API_URL
+                access_token = await self.auth_client.async_get_access_token()
 
-        access_token = await self.auth_client.async_get_access_token()
+        url = URL(f"{base_url.strip('/')}/").join(URL(uri))
+
         headers = {
             "Authorization": f"Bearer {access_token}",
             **self.request_header,
@@ -423,7 +470,9 @@ class PodMeClient:
         self._ensure_session()
 
         try:
-            resp = await self.session.get(download_url, raise_for_status=True)
+            resp = await self.session.get(download_url, raise_for_status=True, headers={
+                "User-Agent": self.user_agent
+            })
             total_size = int(resp.headers.get("Content-Length", 0))
             on_progress(PodMeDownloadProgressTask.DOWNLOAD_FILE, str(download_url), 0, total_size)
             current_size = 0
@@ -477,27 +526,6 @@ class PodMeClient:
             on_finished=on_finished,
         )
 
-    async def get_episode_download_url(self, episode: PodMeEpisode | int) -> tuple[int, URL]:
-        """Get the download URL for an episode.
-
-        Args:
-            episode (PodMeEpisode | int): The episode object or episode ID to get the download URL for.
-
-        Returns:
-            tuple[int, URL]: The episode ID and the download URL.
-
-        Raises:
-            PodMeApiStreamUrlError: If unable to find url from m3u8, or if the url isn't downloadable.
-
-        """
-        episode_data = episode
-        if isinstance(episode_data, int):
-            episode_data = await self.get_episode_info(episode)
-        if episode_data.stream_url is None:
-            raise PodMeApiStreamUrlError(f"No stream URL found for episode {episode_data.id}")
-        info = await self.resolve_stream_url(URL(episode_data.stream_url))
-        return episode_data.id, URL(info["url"])
-
     async def get_episode_download_url_bulk(
         self,
         episodes: list[PodMeEpisode | int],
@@ -519,18 +547,35 @@ class PodMeClient:
             PodMeApiStreamUrlError: If unable to find url from m3u8, or if the url isn't downloadable.
 
         """
+        # Extract episode IDs that need to be fetched
+        episode_ids_to_fetch = [ep for ep in episodes if isinstance(ep, int)]
+        episode_objects = [ep for ep in episodes if isinstance(ep, PodMeEpisode)]
 
-        def filter_unique_ids(urls_list):
-            seen = set()
-            ret = []
-            for item in urls_list:
-                if item[0] not in seen:
-                    seen.add(item[0])
-                    ret.append(item)
-            return ret
+        # Fetch episode data for IDs in bulk
+        if episode_ids_to_fetch:
+            fetched_episodes = await self.get_episodes_info(episode_ids_to_fetch)
+            episode_objects.extend(fetched_episodes)
 
-        result = await self._run_concurrent(self.get_episode_download_url, episodes)
-        return filter_unique_ids(result)
+        # Process all episode objects in parallel
+        async def get_url(ep):
+            if ep.url is not None:
+                return ep.id, URL(ep.url)
+            if ep.stream_url is None:
+                raise PodMeApiStreamUrlError(f"No stream URL found for episode {ep.id}")
+            info = await self.resolve_stream_url(URL(ep.stream_url))
+            return ep.id, URL(info["url"])
+
+        result = await asyncio.gather(*[get_url(ep) for ep in episode_objects])
+
+        # Filter unique IDs
+        seen = set()
+        filtered_result = []
+        for item in result:
+            if item[0] not in seen:
+                seen.add(item[0])
+                filtered_result.append(item)
+
+        return filtered_result
 
     async def get_username(self) -> str:
         """Get the username of the authenticated user."""
@@ -818,7 +863,33 @@ class PodMeClient:
         data = await self._request(
             f"episode/{episode_id}",
         )
-        return PodMeEpisode.from_dict(data)
+        base_episode = PodMeEpisode.from_dict(data)
+        podcast_id = base_episode.podcast_id
+        page = 0
+        page_size = 50
+
+        while True:
+            # Request a page of episodes for the given podcast
+            episodes_data = await self._request(
+                f"episodes/podcast/{podcast_id}?page={page}&pageSize={page_size}&orderBy=0", METH_GET, 0,
+                api='mobile'
+            )
+
+            # Check if we got any episodes back
+            if not episodes_data or len(episodes_data) == 0:
+                # No more episodes to check
+                break
+
+            # Search for the target episode in this page
+            for episode_data in episodes_data:
+                if episode_data.get('id') == episode_id:
+                    # Found the target episode
+                    return PodMeEpisode.from_dict(episode_data)
+
+            # Move to the next page
+            page += 1
+
+        raise PodMeApiNotFoundError("Episode not found")
 
     async def get_episodes_info(self, episode_ids: list[int]) -> list[PodMeEpisode]:
         """Get information about multiple episodes.
@@ -827,8 +898,62 @@ class PodMeClient:
             episode_ids (list[int]): The IDs of the episodes.
 
         """
-        episodes = await asyncio.gather(*[self.get_episode_info(episode_id) for episode_id in episode_ids])
-        return list(episodes)
+        episode_to_podcast = {}
+        podcast_to_episodes = {}
+
+        async def get_podcast_id(episode_id):
+            data = await self._request(f"episode/{episode_id}")
+            base_episode = PodMeEpisode.from_dict(data)
+            return episode_id, base_episode.podcast_id
+
+        id_results = await asyncio.gather(*[get_podcast_id(episode_id) for episode_id in episode_ids])
+
+        for episode_id, podcast_id in id_results:
+            episode_to_podcast[episode_id] = podcast_id
+
+            if podcast_id not in podcast_to_episodes:
+                podcast_to_episodes[podcast_id] = []
+            podcast_to_episodes[podcast_id].append(episode_id)
+
+        async def process_podcast(target_podcast_id, target_episode_ids):
+            result_episodes = []
+            page = 0
+            page_size = 50
+            found_episode_ids = set()
+
+            while found_episode_ids != set(target_episode_ids):
+                episodes_data = await self._request(
+                    f"episodes/podcast/{target_podcast_id}?page={page}&pageSize={page_size}&orderBy=0", METH_GET, 0,
+                    api='mobile'
+                )
+
+                if not episodes_data or len(episodes_data) == 0:
+                    break
+
+                for episode_data in episodes_data:
+                    found_episode_id = episode_data.get('id')
+                    if found_episode_id in target_episode_ids and found_episode_id not in found_episode_ids:
+                        episode = PodMeEpisode.from_dict(episode_data)
+                        result_episodes.append(episode)
+                        found_episode_ids.add(episode.id)
+
+                if len(found_episode_ids) == len(target_episode_ids):
+                    break
+
+                page += 1
+
+            return result_episodes
+
+        tasks = [process_podcast(podcast_id, episode_ids)
+                 for podcast_id, episode_ids in podcast_to_episodes.items()]
+        results = await asyncio.gather(*tasks)
+
+        all_episodes = []
+        for podcast_episodes in results:
+            all_episodes.extend(podcast_episodes)
+
+        episode_dict = {episode.id: episode for episode in all_episodes}
+        return [episode_dict.get(episode_id) for episode_id in episode_ids]
 
     async def search_podcast(
         self,
@@ -922,14 +1047,18 @@ class PodMeClient:
         _LOGGER.debug("Checking stream URL: <%s>", stream_url)
 
         # Check if the audio URL is directly downloadable
-        response = await self.session.get(stream_url)
+        response = await self.session.get(stream_url, headers={
+            "User-Agent": self.user_agent
+        })
         # Needed for acast.com, which redirects to an URL containing @ instead of %40.
         if "@" in response.url.query_string:
             stream_url = URL(str(response.url).replace("@", "%40"), encoded=True)
         else:
             stream_url = response.url
 
-        response = await self.session.head(stream_url, allow_redirects=True)
+        response = await self.session.head(stream_url, allow_redirects=True, headers={
+            "User-Agent": self.user_agent
+        })
         if response.status != HTTPStatus.OK:
             raise PodMeApiStreamUrlError(f"Stream URL is not downloadable: <{stream_url}>")
         content_length = response.headers.get("Content-Length")
@@ -977,13 +1106,15 @@ class PodMeClient:
         _LOGGER.debug("Resolving m3u8 URL: <%s>", master_url)
 
         # Fetch master.m3u8
-        response = await self.session.get(master_url)
+        response = await self.session.get(master_url, headers={
+            "User-Agent": self.user_agent
+        })
         master_content = await response.text()
 
         # Parse master.m3u8 to get the audio playlist URL (first match only).
         audio_playlist_url: URL | None = None
         for line in master_content.splitlines():
-            if line.endswith(".m3u8"):
+            if ".m3u8" in line:
                 audio_playlist_url = master_url.join(URL(line.strip()))
                 break
 
@@ -991,7 +1122,9 @@ class PodMeClient:
             raise PodMeApiPlaylistUrlNotFoundError(f"Could not find audio playlist URL in <{master_url}>")
 
         # Fetch audio playlist
-        response = await self.session.get(audio_playlist_url)
+        response = await self.session.get(audio_playlist_url, headers={
+            "User-Agent": self.user_agent
+        })
         audio_playlist_content = await response.text()
 
         # Parse audio playlist to get the audio segment URL

@@ -337,6 +337,7 @@ class PodMeEpisode(PodMeEpisodeBase):
     small_image_url: str = field(metadata=field_options(alias="smallImageUrl"))
     medium_image_url: str = field(metadata=field_options(alias="mediumImageUrl"))
     stream_url: str | None = field(default=None, metadata=field_options(alias="streamUrl"))
+    url: str | None = field(default=None, metadata=field_options(alias="url"))
     slug: str | None = None
     current_spot: time = field(
         metadata=field_options(
