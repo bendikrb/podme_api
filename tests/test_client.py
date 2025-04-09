@@ -17,6 +17,7 @@ import pytest
 from yarl import URL
 
 from podme_api import PodMeClient, PodMeDefaultAuthClient, SchibstedCredentials
+from podme_api.auth.mobile_client import PodMeMobileAuthClient
 from podme_api.const import PODME_API_URL
 from podme_api.exceptions import (
     PodMeApiConnectionError,
@@ -951,17 +952,25 @@ async def test_session_close():
     await auth_client.close()
     auth_client.session.close.assert_called_once()
 
-    client = PodMeClient(auth_client=auth_client, disable_credentials_storage=True)
+    mobile_auth_client = PodMeMobileAuthClient()
+    mobile_auth_client.session = AsyncMock(spec=aiohttp.ClientSession)
+    mobile_auth_client._close_session = True  # pylint: disable=protected-access
+    await mobile_auth_client.close()
+    mobile_auth_client.session.close.assert_called_once()
+
+    client = PodMeClient(auth_client=auth_client, mobile_auth_client=mobile_auth_client, disable_credentials_storage=True)
     client.session = AsyncMock(spec=aiohttp.ClientSession)
     client._close_session = True  # pylint: disable=protected-access
     await client.close()
     client.session.close.assert_called_once()
 
 
-async def test_context_manager(podme_default_auth_client):
+async def test_context_manager(podme_default_auth_client, podme_mobile_auth_client):
     async with podme_default_auth_client() as auth_client:
-        assert isinstance(auth_client, PodMeDefaultAuthClient)
-        async with PodMeClient(auth_client=auth_client, disable_credentials_storage=True) as client:
-            assert isinstance(client, PodMeClient)
-        assert client.session is None or client.session.closed
+        async with podme_mobile_auth_client() as mobile_auth_client:
+            assert isinstance(auth_client, PodMeDefaultAuthClient)
+            assert isinstance(mobile_auth_client, PodMeMobileAuthClient)
+            async with PodMeClient(auth_client=auth_client, mobile_auth_client=mobile_auth_client, disable_credentials_storage=True) as client:
+                assert isinstance(client, PodMeClient)
+            assert client.session is None or client.session.closed
     assert auth_client.session is None or auth_client.session.closed

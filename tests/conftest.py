@@ -7,6 +7,7 @@ import logging
 import pytest
 
 from podme_api.auth import PodMeDefaultAuthClient
+from podme_api.auth.mobile_client import PodMeMobileAuthClient
 from podme_api.auth.models import PodMeUserCredentials, SchibstedCredentials
 from podme_api.client import PodMeClient
 
@@ -24,18 +25,23 @@ async def podme_client(default_credentials, user_credentials):
     @contextlib.asynccontextmanager
     async def _podme_client(
         credentials: SchibstedCredentials | None = None,
+        mobile_credentials: SchibstedCredentials | None = None,
         load_default_credentials: bool = True,
         load_default_user_credentials: bool = False,
         conf_dir: str | None = None,
     ) -> PodMeClient:
         user_creds = user_credentials if load_default_user_credentials is True else None
         auth_client = PodMeDefaultAuthClient(user_credentials=user_creds)
+        mobile_auth_client = PodMeMobileAuthClient(user_credentials=user_creds)
         if credentials is not None:
             auth_client.set_credentials(credentials)
-        elif load_default_credentials:
+        if mobile_credentials is not None:
+            mobile_auth_client.set_credentials(mobile_credentials)
+        if load_default_credentials:
             auth_client.set_credentials(default_credentials)
+            mobile_auth_client.set_credentials(default_credentials)
         disable_credentials_storage = conf_dir is None
-        client = PodMeClient(auth_client=auth_client, disable_credentials_storage=disable_credentials_storage)
+        client = PodMeClient(auth_client=auth_client, mobile_auth_client=mobile_auth_client, disable_credentials_storage=disable_credentials_storage)
         if conf_dir is not None:
             _LOGGER.info("Setting configuration directory to <%s>", conf_dir)
             client.set_conf_dir(conf_dir)
@@ -72,6 +78,34 @@ async def podme_default_auth_client(user_credentials, default_credentials):
             yield auth_client
         finally:
             await auth_client.__aexit__(None, None, None)
+
+    return _podme_auth_client
+
+
+@pytest.fixture
+async def podme_mobile_auth_client(user_credentials, default_credentials):
+    """Return PodMeMobileAuthClient."""
+
+    @contextlib.asynccontextmanager
+    async def _podme_auth_client(
+        credentials: SchibstedCredentials | None = None,
+        load_default_credentials: bool = True,
+        load_default_user_credentials: bool = True,
+    ) -> PodMeDefaultAuthClient:
+        mobile_auth_client = PodMeMobileAuthClient()
+
+        if load_default_user_credentials:
+            mobile_auth_client.user_credentials = user_credentials
+        if credentials is not None:
+            mobile_auth_client.set_credentials(credentials)
+        elif load_default_credentials:
+            mobile_auth_client.set_credentials(default_credentials)
+
+        try:
+            await mobile_auth_client.__aenter__()
+            yield mobile_auth_client
+        finally:
+            await mobile_auth_client.__aexit__(None, None, None)
 
     return _podme_auth_client
 
