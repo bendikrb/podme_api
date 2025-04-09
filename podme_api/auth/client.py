@@ -276,12 +276,18 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
                 "redirectToAccountPage": "",
             },
         )
-        final_location = response.history[-1].headers.get("Location")
-        jwt_cookie = response.history[-1].cookies.get("jwt-cred").value
-        jwt_cred = unquote(jwt_cookie)
-        self.set_credentials(jwt_cred)
+        jwt_cred = None
+        for h in response.history:
+            jwt_cookie = h.cookies.get("jwt-cred")
+            if jwt_cookie is not None:
+                jwt_cred = unquote(jwt_cookie.value)
+                break
 
-        _LOGGER.debug(f"Login successful: (final location: {final_location})")
+        if jwt_cred is not None:
+            self.set_credentials(jwt_cred)
+            _LOGGER.debug(f"Login successful")
+        else:
+            _LOGGER.error("Login failed")
 
         await self.close()
 
