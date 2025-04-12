@@ -339,17 +339,7 @@ class PodMeEpisode(PodMeEpisodeBase):
     stream_url: str | None = field(default=None, metadata=field_options(alias="streamUrl"))
     url: str | None = field(default=None, metadata=field_options(alias="url"))
     slug: str | None = None
-    current_spot: time = field(
-        metadata=field_options(
-            alias="currentSpot",
-            deserialize=time.fromisoformat,
-            serialize=time.isoformat,
-        )
-    )
-    current_spot_sec: int = field(metadata=field_options(alias="currentSpotSec"))
-    episode_can_be_played: bool = field(metadata=field_options(alias="episodeCanBePlayed"))
     only_as_package_subscription: bool = field(metadata=field_options(alias="onlyAsPackageSubscription"))
-    has_completed: bool = field(metadata=field_options(alias="hasCompleted"))
     is_rss: bool | None = field(default=None, metadata=field_options(alias="isRss"))
     total_no_of_episodes: int | None = field(default=None, metadata=field_options(alias="totalNoOfEpisodes"))
 
