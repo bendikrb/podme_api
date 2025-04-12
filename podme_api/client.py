@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Callable, Self, Sequence, TypeVar, Literal, Op
 
 import aiofiles
 import aiofiles.os
+import requests
 from aiohttp.client import ClientError, ClientPayloadError, ClientResponseError, ClientSession
 from aiohttp.hdrs import METH_DELETE, METH_GET, METH_POST
 from ffmpeg.asyncio import FFmpeg
@@ -485,8 +486,24 @@ class PodMeClient:
                         PodMeDownloadProgressTask.DOWNLOAD_FILE, str(download_url), current_size, total_size
                     )
         except (ClientPayloadError, ClientResponseError) as err:
-            msg = f"Error while downloading {download_url}"
-            raise PodMeApiDownloadError(msg) from err
+            _LOGGER.warning("Failed to download using 'aiohttp', falling back to 'requests'")
+            resp = requests.get(str(download_url), stream=True, headers={
+                "User-Agent": self.user_agent
+            })
+            if not resp.ok:
+                msg = f"Error while downloading {download_url}"
+                raise PodMeApiDownloadError(msg) from err
+            total_size = int(resp.headers.get("Content-Length", 0))
+            current_size = 0
+            on_progress(PodMeDownloadProgressTask.DOWNLOAD_FILE, str(download_url), 0, total_size)
+            async with aiofiles.open(save_path, mode="wb") as f:
+                _LOGGER.debug("Starting download of <%s>", download_url)
+                for chunk in resp.iter_content(chunk_size=8192):
+                    await f.write(chunk)
+                    current_size += len(chunk)
+                    on_progress(
+                        PodMeDownloadProgressTask.DOWNLOAD_FILE, str(download_url), current_size, total_size
+                    )
 
         _LOGGER.debug("Finished download of <%s> to <%s>", download_url, save_path)
 
