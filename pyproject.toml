@@ -36,6 +36,7 @@ mashumaro = "^3.13.1"
 orjson = "^3.10.7"
 isodate = "^0.7.2"
 python-ffmpeg = "^2.0.12"
+pkce = "==1.0.3"
 
 [tool.poetry.group.dev.dependencies]
 aresponses = "^3.0.0"

@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import time
+from datetime import date, datetime, time
 from http import HTTPStatus
 import json
 import logging
 import math
 from pathlib import Path
 import socket
-from typing import TYPE_CHECKING, Callable, Self, Sequence, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Self, Sequence, TypeVar
 
 import aiofiles
 import aiofiles.os
 from aiohttp.client import ClientError, ClientPayloadError, ClientResponseError, ClientSession
-from aiohttp.hdrs import METH_DELETE, METH_GET, METH_POST
+from aiohttp.hdrs import METH_DELETE, METH_GET, METH_PATCH, METH_POST
 from ffmpeg.asyncio import FFmpeg
 from ffmpeg.errors import FFmpegError
 import platformdirs
@@ -25,6 +25,7 @@ from yarl import URL
 from podme_api.const import (
     DEFAULT_REQUEST_TIMEOUT,
     PODME_API_URL,
+    PODME_API_USER_AGENT,
 )
 from podme_api.exceptions import (
     PodMeApiConnectionError,
@@ -38,18 +39,22 @@ from podme_api.exceptions import (
     PodMeApiStreamUrlNotFoundError,
     PodMeApiUnauthorizedError,
 )
+from podme_api.helpers import async_cache, get_total_seconds
 from podme_api.models import (
     PodMeCategory,
     PodMeCategoryPage,
     PodMeDownloadProgressTask,
-    PodMeEpisode,
+    PodMeEpisodeData,
     PodMeHomeScreen,
     PodMeLanguage,
     PodMePodcast,
     PodMePodcastBase,
     PodMeRegion,
     PodMeSearchResult,
+    PodMeSortModeSavedList,
     PodMeSubscription,
+    PodMeSubscriptions,
+    PodMeUser,
 )
 
 if TYPE_CHECKING:
@@ -81,8 +86,7 @@ class PodMeClient:
     """(PodMeLanguage): The language setting for the client."""
     region = PodMeRegion.NO
     """(PodMeRegion): The region setting for the client."""
-
-    request_timeout: int = DEFAULT_REQUEST_TIMEOUT
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT
     """The timeout for API requests in seconds."""
     session: ClientSession | None = None
     """(ClientSession | None): The :class:`aiohttp.ClientSession` to use for API requests."""
@@ -114,7 +118,7 @@ class PodMeClient:
 
         """
         if filename is None:
-            filename = Path(self._conf_dir) / "credentials.json"
+            filename = Path(self._conf_dir) / self.auth_client.credentials_filename
         filename = Path(filename).resolve()
         credentials = self.auth_client.get_credentials()
         if credentials is None:  # pragma: no cover
@@ -132,7 +136,7 @@ class PodMeClient:
 
         """
         if filename is None:
-            filename = Path(self._conf_dir) / "credentials.json"
+            filename = Path(self._conf_dir) / self.auth_client.credentials_filename
         filename = Path(filename).resolve()
         if not filename.exists():
             _LOGGER.warning("Credentials file does not exist: <%s>", filename)
@@ -218,7 +222,7 @@ class PodMeClient:
             if response.status == HTTPStatus.TOO_MANY_REQUESTS:
                 raise PodMeApiRateLimitError("Rate limit error has occurred with the PodMe API")
             if response.status == HTTPStatus.NOT_FOUND:
-                raise PodMeApiNotFoundError("Resource not found")
+                raise PodMeApiNotFoundError(f"Resource not found: <{url}>")
             if response.status == HTTPStatus.BAD_REQUEST:
                 raise PodMeApiError("Bad request syntax or unsupported method")
             if response.status == HTTPStatus.UNAUTHORIZED:
@@ -264,6 +268,7 @@ class PodMeClient:
         return {
             "Accept": "application/json",
             "X-Region": str(self.region),
+            "User-Agent": PODME_API_USER_AGENT,
         }
 
     async def _get_pages(
@@ -274,6 +279,7 @@ class PodMeClient:
         page_size: int | None = None,
         params: dict | None = None,
         items_key: str | None = None,
+        **kwargs,
     ):
         """Retrieve multiple pages of data from the API.
 
@@ -284,6 +290,7 @@ class PodMeClient:
             page_size: The number of items per page.
             params: Additional parameters for the request.
             items_key: The key for the items in the response.
+            **kwargs: Additional keyword arguments which will be passed on to the request.
 
         Returns:
             list: The retrieved data.
@@ -304,6 +311,7 @@ class PodMeClient:
                         "getByOldest": "true" if get_by_oldest else None,
                         **params,
                     },
+                    **kwargs,
                 )
                 if not isinstance(new_results, list) and items_key is not None:
                     new_results = new_results.get(items_key, [])
@@ -477,11 +485,11 @@ class PodMeClient:
             on_finished=on_finished,
         )
 
-    async def get_episode_download_url(self, episode: PodMeEpisode | int) -> tuple[int, URL]:
+    async def get_episode_download_url(self, episode: PodMeEpisodeData | int) -> tuple[int, URL]:
         """Get the download URL for an episode.
 
         Args:
-            episode (PodMeEpisode | int): The episode object or episode ID to get the download URL for.
+            episode (PodMeEpisodeData | int): The episode object or episode ID to get the download URL for.
 
         Returns:
             tuple[int, URL]: The episode ID and the download URL.
@@ -493,6 +501,8 @@ class PodMeClient:
         episode_data = episode
         if isinstance(episode_data, int):
             episode_data = await self.get_episode_info(episode)
+        if episode_data.url is not None:
+            return episode_data.id, URL(episode_data.url)
         if episode_data.stream_url is None:
             raise PodMeApiStreamUrlError(f"No stream URL found for episode {episode_data.id}")
         info = await self.resolve_stream_url(URL(episode_data.stream_url))
@@ -500,7 +510,7 @@ class PodMeClient:
 
     async def get_episode_download_url_bulk(
         self,
-        episodes: list[PodMeEpisode | int],
+        episodes: list[PodMeEpisodeData | int],
     ) -> list[tuple[int, URL]]:
         """Get download URLs for a list of episodes.
 
@@ -508,7 +518,7 @@ class PodMeClient:
         ensures that only unique episode IDs are included in the result.
 
         Args:
-            episodes (list[PodMeEpisode | int]): A list of PodMeEpisode objects
+            episodes (list[PodMeEpisodeData | int]): A list of PodMeEpisode objects
                 or episode IDs for which to fetch download URLs.
 
         Returns:
@@ -534,90 +544,104 @@ class PodMeClient:
 
     async def get_username(self) -> str:
         """Get the username of the authenticated user."""
-        return await self._request(
-            "user",
+        data = await self._request(
+            "v2/user",
         )
+        user = PodMeUser.from_dict(data)
+        return user.email
 
     async def get_user_subscription(self) -> list[PodMeSubscription]:
         """Get the user's subscriptions."""
-        subscriptions = await self._request(
-            "subscription",
-        )
-        return [PodMeSubscription.from_dict(sub) for sub in subscriptions]
+        data = await self._request("v2/subscriptions")
+        subscriptions = PodMeSubscriptions.from_dict(data)
+        subscription = [
+            *subscriptions.adyen_subscriptions,
+            *subscriptions.apple_subscriptions,
+            *subscriptions.google_subscriptions,
+            subscriptions.schibsted_subscription,
+        ]
+        return [s for s in subscription if s is not None]
 
     async def get_user_podcasts(self) -> list[PodMePodcast]:
         """Get the user's podcasts."""
-        podcasts = await self._get_pages(
-            "podcast/userpodcasts",
-        )
+        podcasts = await self._get_pages("v2/podcasts/mypodcasts")
         return [PodMePodcast.from_dict(data) for data in podcasts]
 
-    async def get_categories(self, region: PodMeRegion | None = None) -> list[PodMeCategory]:
-        """Get podcast categories for a specific region.
+    async def get_saved_episodes(
+        self,
+        order_by: PodMeSortModeSavedList | str | None = None,
+        episodes_limit: int = 20,
+    ):
+        """Get the user's saved episodes.
 
         Args:
-            region (PodMeRegion | None): The region to get categories for.
-                If None, uses the client's default region.
+            order_by (PodMeSortModeSavedList | str, optional): The order to sort the saved episodes by;
+                latest_added, oldest_added, latest_released or oldest_released.
+                Defaults to latest_added.
+            episodes_limit (int, optional): The maximum number of episodes to return. Defaults to 20.
 
         """
-        if region is None:
-            region = self.region
-        response = await self._request(
-            "cms/categories",
+
+        if order_by is None:
+            order_by = PodMeSortModeSavedList.LATEST_ADDED
+        elif isinstance(order_by, str):
+            try:
+                order_by = PodMeSortModeSavedList[order_by.upper()]
+            except KeyError as err:
+                valid_values = ", ".join([v.name for v in PodMeSortModeSavedList])
+                raise ValueError(f"Invalid order_by value: {order_by}. Valid values: {valid_values}") from err
+
+        max_per_page = 50
+        pages = math.ceil(episodes_limit / max_per_page)
+        page_size = min(max_per_page, episodes_limit)
+
+        response = await self._get_pages(
+            "v2/playlist/saved-list",
             params={
-                "region": region.value,
+                "orderBy": order_by.value if isinstance(order_by, PodMeSortModeSavedList) else order_by,
             },
+            get_pages=pages,
+            page_size=page_size,
         )
-        # noinspection PyTypeChecker
-        categories = [
-            {
-                **d,
-                "id": int(d["destination"]),
-            }
-            for d in response["categories"]
-        ]
+        return [PodMeEpisodeData.from_dict(data) for data in response]
+
+    async def get_categories(self) -> list[PodMeCategory]:
+        """Get podcast categories."""
+        categories = await self._request("v2/podcasts/categories")
         return [PodMeCategory.from_dict(data) for data in categories]
 
-    async def get_category(self, category_id: int | str, region: PodMeRegion | None = None) -> PodMeCategory:
+    async def get_category(self, category_id: int | str) -> PodMeCategory:
         """Get a category by its ID or key.
 
         Args:
             category_id (int | str): The ID or key of the category.
-            region (PodMeRegion, optional): The region to get the category for.
-                If None, uses the client's default region.
 
         """
         if isinstance(category_id, int):
-            return await self.get_category_by_id(category_id, region)
-        return await self.get_category_by_key(category_id, region)
+            return await self.get_category_by_id(category_id)
+        return await self.get_category_by_key(category_id)
 
-    async def get_category_by_id(self, category_id: int, region: PodMeRegion | None = None) -> PodMeCategory:
+    async def get_category_by_id(self, category_id: int) -> PodMeCategory:
         """Get a category by its ID.
 
         Args:
             category_id (int): The ID of the category.
-            region (PodMeRegion, optional): The region to get the category for.
-                If None, uses the client's default region.
 
         """
-        categories = await self.get_categories(region)
+        categories = await self.get_categories()
         for c in categories:
             if c.id == category_id:
                 return c
         raise PodMeApiError(f"Category with id {category_id} not found.")
 
-    async def get_category_by_key(
-        self, category_key: str, region: PodMeRegion | None = None
-    ) -> PodMeCategory:
+    async def get_category_by_key(self, category_key: str) -> PodMeCategory:
         """Get a category by its key.
 
         Args:
             category_key (str): The key of the category.
-            region (PodMeRegion, optional): The region to get the category for.
-                If None, uses the client's default region.
 
         """
-        categories = await self.get_categories(region)
+        categories = await self.get_categories()
         for c in categories:
             if c.key == category_key:
                 return c
@@ -626,29 +650,25 @@ class PodMeClient:
     async def get_category_page(
         self,
         category: PodMeCategory | int | str,
-        region: PodMeRegion | None = None,
     ) -> PodMeCategoryPage:
         """Get the page for a specific category.
 
         Args:
             category (PodMeCategory | int | str): The category, its ID, or its key.
-            region (PodMeRegion, optional): The region to get the category page for.
-                If None, uses the client's default region.
 
         """
         if not isinstance(category, PodMeCategory):
-            category = await self.get_category(category, region)
-        region_name = region.name if region is not None else self.region.name
-        page_id = f"{region_name}_{category.key}"
+            category = await self.get_category(category)
+        page_id = f"{self.region.name}_{category.key}"
         response = await self._request(
-            f"cms/categories-page/{page_id.upper()}",
+            f"v2/cms/categories-page/{page_id.upper()}",
         )
         return PodMeCategoryPage.from_dict(response)
 
     async def get_podcasts_by_category(
         self,
         category: PodMeCategory | int,
-        region: PodMeRegion | None = None,
+        premium_only=True,
         pages: int | None = None,
         page_size: int | None = None,
     ) -> list[PodMePodcastBase]:
@@ -656,27 +676,27 @@ class PodMeClient:
 
         Args:
             category (PodMeCategory | int): The category or its ID.
-            region (PodMeRegion, optional): The region to get podcasts for.
-                If None, uses the client's default region.
+            premium_only (bool, optional): Whether to only get premium podcasts. Defaults to True.
             pages (int, optional): The number of pages to retrieve.
             page_size (int, optional): The number of items per page.
 
         """
         category_id = category.id if isinstance(category, PodMeCategory) else category
-        region_id = region.value if region is not None else self.region.value
-        podcasts = await self._get_pages(
-            f"podcast/category/{category_id}",
-            params={"region": region_id},
+        results = await self._get_pages(
+            "v2/podcasts/search",
+            params={
+                "categoryId": category_id,
+                "premium": "true" if premium_only else "false",
+            },
             get_pages=pages,
             page_size=page_size,
-            items_key="podcasts",
         )
-        return [PodMePodcastBase.from_dict(data) for data in podcasts]
+        return [PodMePodcastBase.from_search_result(data) for data in results]
 
     async def get_home_screen(self) -> PodMeHomeScreen:
         """Get the home screen content."""
         response = await self._request(
-            "cms/home-screen",
+            "v2/cms/home-screen",
         )
         return PodMeHomeScreen.from_dict(response)
 
@@ -702,7 +722,7 @@ class PodMeClient:
             category = category.key if isinstance(category, PodMeCategory) else category
 
         podcasts = await self._get_pages(
-            "podcast/popular",
+            "v2/podcasts/popular",
             params={
                 "podcastType": podcast_type,
                 "category": category,
@@ -720,11 +740,8 @@ class PodMeClient:
             podcast_id (int): The ID of the podcast.
 
         """
-        response = await self._request(
-            f"bookmark/{podcast_id}",
-            method=METH_GET,
-        )
-        return response == "true"
+        subscribed = await self.get_user_podcasts()
+        return podcast_id in [d.id for d in subscribed]
 
     async def subscribe_to_podcast(self, podcast_id: int) -> bool:
         """Subscribe to a podcast.
@@ -734,7 +751,7 @@ class PodMeClient:
 
         """
         return await self._request(
-            f"bookmark/{podcast_id}",
+            f"v2/podcasts/bookmarks/{podcast_id}",
             method=METH_POST,
         )
 
@@ -746,7 +763,7 @@ class PodMeClient:
 
         """
         return await self._request(
-            f"bookmark/{podcast_id}",
+            f"v2/podcasts/bookmarks/{podcast_id}",
             method=METH_DELETE,
         )
 
@@ -754,14 +771,12 @@ class PodMeClient:
         self,
         episode_id: int,
         playback_progress: time | str | None = None,
-        has_completed: bool = False,
     ) -> bool:
         """Update the playback progress for an episode.
 
         Args:
             episode_id (int): The ID of the episode.
             playback_progress (time | str, optional): The current playback position.
-            has_completed (bool, optional): Whether the episode has been completed. Defaults to False.
 
         """
         if isinstance(playback_progress, str):
@@ -770,22 +785,117 @@ class PodMeClient:
             playback_progress = time()
 
         return await self._request(
-            "player/update",
+            "v3/episodes/player-update",
             method=METH_POST,
             json={
                 "episodeId": episode_id,
-                "currentSpot": playback_progress.isoformat(),
-                "hasCompleted": has_completed,
+                "currentSpotSec": get_total_seconds(playback_progress),
+                "playMode": None,  # @TODO: unsure what values are valid here (str)
+                "playAction": None,  # @TODO: unsure what values are valid here (int)
             },
         )
 
-    async def get_currently_playing(self) -> list[PodMeEpisode]:
+    async def mark_episode_played(self, episode_id: int, played=True) -> bool:
+        """Mark an episode as played/unplayed.
+
+        Args:
+            episode_id (int): The ID of the episode.
+            played (bool, optional): Whether the episode has been played. Defaults to True.
+
+        """
+
+        mark_as = "completed" if played else "uncompleted"
+        return await self._request(
+            f"v2/episodes/{episode_id}/{mark_as}",
+            method=METH_PATCH,
+        )
+
+    async def mark_podcast_played(self, podcast_id: int, played=True) -> bool:
+        """Mark a podcast as played/unplayed.
+
+        Args:
+            podcast_id (int): The ID of the podcast.
+            played (bool, optional): Whether the podcast has been played. Defaults to True.
+
+        """
+
+        mark_as = "completed" if played else "uncompleted"
+        return await self._request(
+            f"v2/episodes/{mark_as}",
+            method=METH_PATCH,
+            json={
+                "podcastId": podcast_id,
+            },
+        )
+
+    async def get_currently_playing(self) -> list[PodMeEpisodeData]:
         """Get the list of currently playing episodes."""
         episodes = await self._get_pages(
-            "episode/currentlyplaying",
+            "v2/episodes/continue",
         )
-        return [PodMeEpisode.from_dict(data) for data in episodes]
+        return [PodMeEpisodeData.from_dict(data) for data in episodes]
 
+    async def get_queue(self) -> list[PodMeEpisodeData]:
+        """Get the list of queued episodes."""
+        episodes = await self._get_pages(
+            "v2/episodes/queue",
+        )
+        return [PodMeEpisodeData.from_dict(data) for data in episodes]
+
+    async def get_unplayed_episodes(self) -> list[PodMeEpisodeData]:
+        """Get the list of unplayed episodes."""
+        episodes = await self._get_pages(
+            "v2/episodes/unplayed",
+        )
+        return [PodMeEpisodeData.from_dict(data) for data in episodes]
+
+    async def get_feed(
+        self,
+        from_date: datetime | date | str | None = None,
+        exclude_started: bool = False,
+        exclude_completed: bool = False,
+        get_by_oldest: bool = False,
+        only_uncompleted: bool = False,
+        episodes_limit: int = 20,
+    ):
+        """Get the user's feed.
+
+        Args:
+            from_date (datetime | date | str, optional): Get episodes from a specific date.
+            exclude_started (bool, optional): Exclude episodes that have been started. Defaults to False.
+            exclude_completed (bool, optional): Exclude episodes that have been completed. Defaults to False.
+            get_by_oldest (bool, optional): Sort the oldest episodes first. Defaults to False.
+            only_uncompleted (bool, optional): Only include uncompleted episodes. Defaults to False.
+            episodes_limit (int, optional): The maximum number of episodes to retrieve. Defaults to 20.
+
+        """
+        max_per_page = 50
+        pages = math.ceil(episodes_limit / max_per_page)
+        page_size = min(max_per_page, episodes_limit)
+
+        params = {
+            "excludeStarted": exclude_started,
+            "excludeCompleted": exclude_completed,
+            "orderBy": 1 if get_by_oldest else 0,
+            "onlyUncompleted": only_uncompleted,
+        }
+        if from_date is not None:
+            if isinstance(from_date, (datetime, date)):
+                # noinspection PyTypeChecker
+                params["fromDate"] = from_date.isoformat()
+            elif isinstance(from_date, str):
+                # noinspection PyTypeChecker
+                params["fromDate"] = from_date
+
+        response = await self._get_pages(
+            "v2/episodes/feed",
+            params=params,
+            get_pages=pages,
+            page_size=page_size,
+        )
+        return [PodMeEpisodeData.from_dict(data) for data in response]
+
+    @async_cache
     async def get_podcast_info(self, podcast_slug: str) -> PodMePodcast:
         """Get information about a podcast.
 
@@ -794,7 +904,7 @@ class PodMeClient:
 
         """
         data = await self._request(
-            f"podcast/slug/{podcast_slug}",
+            f"v2/podcasts/slug/{podcast_slug}",
         )
         return PodMePodcast.from_dict(data)
 
@@ -808,7 +918,7 @@ class PodMeClient:
         podcasts = await asyncio.gather(*[self.get_podcast_info(slug) for slug in podcast_slugs])
         return list(podcasts)
 
-    async def get_episode_info(self, episode_id: int) -> PodMeEpisode:
+    async def get_episode_info(self, episode_id: int) -> PodMeEpisodeData:
         """Get information about an episode.
 
         Args:
@@ -816,11 +926,11 @@ class PodMeClient:
 
         """
         data = await self._request(
-            f"episode/{episode_id}",
+            f"v2/episodes/{episode_id}",
         )
-        return PodMeEpisode.from_dict(data)
+        return PodMeEpisodeData.from_dict(data)
 
-    async def get_episodes_info(self, episode_ids: list[int]) -> list[PodMeEpisode]:
+    async def get_episodes_info(self, episode_ids: list[int]) -> list[PodMeEpisodeData]:
         """Get information about multiple episodes.
 
         Args:
@@ -845,7 +955,7 @@ class PodMeClient:
 
         """
         podcasts = await self._get_pages(
-            "podcast/search",
+            "v2/podcasts/search",
             params={
                 "searchText": search,
             },
@@ -855,22 +965,45 @@ class PodMeClient:
         )
         return [PodMeSearchResult.from_dict(data) for data in podcasts]
 
-    async def get_episode_list(self, podcast_slug: str) -> list[PodMeEpisode]:
+    async def search(self, search: str, pages: int | None = None, page_size: int | None = None):
+        """Search for anything.
+
+        Args:
+            search (str): The search query.
+            pages (int, optional): The number of pages to retrieve.
+            page_size (int, optional): The number of items per page.
+
+        """
+        # @TODO: Add models (with discriminator) for these results.
+        return await self._get_pages(
+            "v4/search/all",
+            params={
+                "searchText": search,
+            },
+            get_pages=pages,
+            page_size=page_size,
+            items_key="results",
+        )
+
+    async def get_episode_list(self, podcast_slug: str) -> list[PodMeEpisodeData]:
         """Get the full list of episodes for a podcast.
 
         Args:
             podcast_slug (str): The slug of the podcast.
 
         """
+        podcast_info = await self.get_podcast_info(podcast_slug)
         episodes = await self._get_pages(
-            f"episode/slug/{podcast_slug}",
+            f"v2/episodes/podcast/{podcast_info.id}",
             get_by_oldest=True,
         )
         _LOGGER.debug("Retrieved full episode list, containing %s episodes", len(episodes))
 
-        return [PodMeEpisode.from_dict(data) for data in episodes]
+        return [PodMeEpisodeData.from_dict(data) for data in episodes]
 
-    async def get_latest_episodes(self, podcast_slug: str, episodes_limit: int = 20) -> list[PodMeEpisode]:
+    async def get_latest_episodes(
+        self, podcast_slug: str, episodes_limit: int = 20
+    ) -> list[PodMeEpisodeData]:
         """Get the latest episodes for a podcast.
 
         Args:
@@ -881,9 +1014,10 @@ class PodMeClient:
         max_per_page = 50
         pages = math.ceil(episodes_limit / max_per_page)
         page_size = min(max_per_page, episodes_limit)
+        podcast_info = await self.get_podcast_info(podcast_slug)
 
         episodes = await self._get_pages(
-            f"episode/slug/{podcast_slug}",
+            f"v2/episodes/podcast/{podcast_info.id}",
             get_pages=pages,
             page_size=page_size,
         )
@@ -893,7 +1027,7 @@ class PodMeClient:
             episodes_limit,
             len(episodes),
         )
-        return [PodMeEpisode.from_dict(data) for data in episodes]
+        return [PodMeEpisodeData.from_dict(data) for data in episodes]
 
     async def get_episode_ids(self, podcast_slug) -> list[int]:
         """Get the IDs of all episodes for a podcast.
@@ -923,7 +1057,7 @@ class PodMeClient:
 
         # Check if the audio URL is directly downloadable
         response = await self.session.get(stream_url)
-        # Needed for acast.com, which redirects to an URL containing @ instead of %40.
+        # Needed for acast.com, which redirects to a URL containing @ instead of %40.
         if "@" in response.url.query_string:
             stream_url = URL(str(response.url).replace("@", "%40"), encoded=True)
         else:
@@ -983,7 +1117,7 @@ class PodMeClient:
         # Parse master.m3u8 to get the audio playlist URL (first match only).
         audio_playlist_url: URL | None = None
         for line in master_content.splitlines():
-            if line.endswith(".m3u8"):
+            if ".m3u8" in line:
                 audio_playlist_url = master_url.join(URL(line.strip()))
                 break
 
@@ -1013,7 +1147,7 @@ class PodMeClient:
     @staticmethod
     async def _run_concurrent(
         func: Callable[..., T],
-        args_list: Sequence[any],
+        args_list: Sequence[Any],
         **kwargs: any,
     ) -> list[T]:
         """Run multiple asynchronous tasks concurrently.

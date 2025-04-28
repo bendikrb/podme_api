@@ -2,23 +2,25 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+import hashlib
 from http import HTTPStatus
 import json
 import logging
+import os
+import secrets
 import socket
 from typing import TYPE_CHECKING
-from urllib.parse import unquote
 
 from aiohttp import ClientError, ClientResponse, ClientResponseError, ClientSession
 from aiohttp.hdrs import METH_GET, METH_POST
+import pkce
 from yarl import URL
 
 from podme_api.auth.common import PodMeAuthClient
 from podme_api.auth.models import SchibstedCredentials
-from podme_api.auth.utils import get_now_iso, get_uuid, parse_schibsted_auth_html
 from podme_api.const import (
     PODME_AUTH_BASE_URL,
-    PODME_AUTH_RETURN_URL,
     PODME_AUTH_USER_AGENT,
     PODME_BASE_URL,
 )
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-CLIENT_ID = "66fd26cdae6bde57ef206b35"
+CLIENT_ID = "62557b19f552881812b7431c"
 
 
 @dataclass
@@ -49,33 +51,25 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
     """User agent string for API requests."""
 
     device_data = {
-        "platform": "Ubuntu",
-        "userAgent": "Firefox",
-        "userAgentVersion": "131.0",
+        "platform": "Android",
+        "userAgent": "Chrome",
+        "userAgentVersion": "128.0.0.0",
         "hasLiedOs": "0",
         "hasLiedBrowser": "0",
         "fonts": [
             "Arial",
-            "Bitstream Vera Sans Mono",
-            "Bookman Old Style",
-            "Century Schoolbook",
             "Courier",
             "Courier New",
+            "Georgia",
             "Helvetica",
-            "MS Gothic",
-            "MS PGothic",
+            "Monaco",
             "Palatino",
-            "Palatino Linotype",
+            "Tahoma",
             "Times",
             "Times New Roman",
+            "Verdana",
         ],
-        "plugins": [
-            "PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf",
-            "Chrome PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf",
-            "Chromium PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf",
-            "Microsoft Edge PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf",
-            "WebKit built-in PDF::Portable Document Format::application/pdf~pdf,text/pdf~pdf",
-        ],
+        "plugins": [],
     }
     """Device information for authentication."""
 
@@ -154,6 +148,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
                     url,
                     **kwargs,
                 )
+                await self._record_response(url.with_query(kwargs.get("params")), method, response)
                 response.raise_for_status()
         except asyncio.TimeoutError as exception:
             raise PodMeApiConnectionTimeoutError(
@@ -205,30 +200,33 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             PodMeApiConnectionError: For other API communication errors.
 
         """
-        # Authorize
+        self.start_pytest_recording("authorize")
+        code_verifier, code_challenge = pkce.generate_pkce_pair()
         response = await self._request(
             "oauth/authorize",
             params={
                 "client_id": CLIENT_ID,
-                "redirect_uri": "https://podme.com/auth/handleSchibstedLogin",
+                "redirect_uri": f"pme.podme.{CLIENT_ID}:/login",
                 "response_type": "code",
-                "scope": "openid email offline_access",
-                "state": json.dumps(
-                    {
-                        "returnUrl": PODME_AUTH_RETURN_URL,
-                        "uuid": get_uuid(),
-                        "schibstedFlowInitiatedDate": get_now_iso(),
-                    }
-                ),
+                "scope": "openid offline_access",
+                "state": hashlib.sha256(os.urandom(1024)).hexdigest(),
+                "nonce": secrets.token_urlsafe(),
+                "code_challenge": code_challenge,
+                "code_challenge_method": "S256",
                 "prompt": "select_account",
             },
+            allow_redirects=False,
         )
-        text = await response.text()
-        bff_data = parse_schibsted_auth_html(text)
-        _LOGGER.debug(f"BFF data: {bff_data}")
-        csrf_token = bff_data.csrf_token
+        # Login: step 1/3
+        await self._request("", METH_GET, response.headers.get("Location"))
+        # Login: step 2/4
+        response = await self._request(
+            "authn/api/settings/csrf",
+            params={"client_id": CLIENT_ID},
+        )
+        csrf_token = (await response.json())["data"]["attributes"]["csrfToken"]
 
-        # Login: step 1/2
+        # Login: step 3/4
         response = await self._request(
             "authn/api/identity/email-status",
             method=METH_POST,
@@ -245,7 +243,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         email_status = await response.json()
         _LOGGER.debug(f"Email status: {email_status}")
 
-        # Login: step 2/2
+        # Login: step 4/4
         response = await self._request(
             "authn/api/identity/login/",
             method=METH_POST,
@@ -269,19 +267,46 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             "authn/identity/finish/",
             method=METH_POST,
             params={"client_id": CLIENT_ID},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
             data={
                 "deviceData": json.dumps(self.device_data),
                 "remember": "true",
                 "_csrf": csrf_token,
                 "redirectToAccountPage": "",
             },
+            allow_redirects=False,
         )
-        final_location = response.history[-1].headers.get("Location")
-        jwt_cookie = response.history[-1].cookies.get("jwt-cred").value
-        jwt_cred = unquote(jwt_cookie)
+
+        # Follow redirect manually
+        response = await self._request("", METH_GET, response.headers.get("Location"), allow_redirects=False)
+        code = URL(response.headers.get("Location")).query.get("code")
+
+        # Request tokens with authorization code
+        response = await self._request(
+            "oauth/token",
+            method=METH_POST,
+            headers={
+                "X-OIDC": "v1",
+                "X-Region": "NO",  # @TODO: Support multiple regions.
+            },
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": f"pme.podme.{CLIENT_ID}:/login",
+                "code_verifier": code_verifier,
+            },
+            allow_redirects=False,
+        )
+        self.stop_pytest_recording()
+
+        jwt_cred = await response.json()
+        jwt_cred["expiration_time"] = int(datetime.now(tz=UTC).timestamp() + jwt_cred["expires_in"])
         self.set_credentials(jwt_cred)
 
-        _LOGGER.debug(f"Login successful: (final location: {final_location})")
+        _LOGGER.debug("Login successful")
 
         await self.close()
 
@@ -302,23 +327,37 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         if credentials is None:
             credentials = self._credentials
 
+        self.start_pytest_recording("refresh_token")
         response = await self._request(
-            "auth/refreshSchibstedSession",
-            base_url=PODME_BASE_URL,
-            json={
-                "code": credentials.refresh_token,
-                "state": get_uuid(),
+            "oauth/token",
+            method=METH_POST,
+            headers={
+                "Host": "payment.schibsted.no",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "AccountSDKAndroidWeb/6.4.0 (Linux; Android 15; API 35; Google; sdk_gphone64_arm64)",
+                "X-OIDC": "v1",
+                "X-Region": "NO",  # @TODO: Support multiple regions.
             },
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "refresh_token",
+                "refresh_token": credentials.refresh_token,
+            },
+            allow_redirects=False,
         )
+        self.stop_pytest_recording()
         refreshed_credentials = await response.json()
+        refreshed_credentials["expiration_time"] = int(
+            datetime.now(tz=UTC).timestamp() + refreshed_credentials["expires_in"]
+        )
         self.set_credentials(SchibstedCredentials.from_dict({
             **credentials.to_dict(),
             **refreshed_credentials,
         }))
-        _LOGGER.debug(f"Refreshed credentials: {self.get_credentials()}")
+
+        _LOGGER.debug("Refresh token successful")
 
         await self.close()
-
         return self._credentials
 
     def get_credentials(self) -> dict | None:
