@@ -8,6 +8,10 @@ test:
 test-coverage:
 	$(run) pytest tests/ --cov-report term-missing --cov=podme_api $(ARGS)
 
+.PHONY: update-fixtures
+update-fixtures:
+	$(run) pytest --update-fixtures tests/ $(ARGS)
+
 .PHONY: coverage
 coverage:
 	$(run) coverage html

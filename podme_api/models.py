@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, time
-from enum import IntEnum, StrEnum, auto
-from typing import TYPE_CHECKING, TypedDict
+from enum import IntEnum, StrEnum
+from typing import TYPE_CHECKING, TypedDict, TypeVar
 
 from mashumaro import field_options
 from mashumaro.config import BaseConfig
@@ -14,6 +14,9 @@ from mashumaro.types import Discriminator
 
 if TYPE_CHECKING:
     from yarl import URL
+
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -26,21 +29,21 @@ class BaseDataClassORJSONMixin(DataClassORJSONMixin):
 class PodMeModels(StrEnum):
     """Enumeration of utilized PodMe models."""
 
-    CATEGORY = auto()
-    PODCAST = auto()
-    EPISODE = auto()
-    SEARCH_RESULT = auto()
-    EPISODE_EXCERPT = auto()
-    SUBSCRIPTION_PLAN = auto()
-    SUBSCRIPTION = auto()
+    CATEGORY = "CATEGORY"
+    PODCAST = "PODCAST"
+    EPISODE = "EPISODE"
+    SEARCH_RESULT = "SEARCH_RESULT"
+    EPISODE_EXCERPT = "EPISODE_EXCERPT"
+    SUBSCRIPTION_PLAN = "SUBSCRIPTION_PLAN"
+    SUBSCRIPTION = "SUBSCRIPTION"
 
 
 class PodMeLanguage(StrEnum):
     """Enumeration of supported PodMe languages."""
 
-    SE = auto()
-    NO = auto()
-    FI = auto()
+    SE = "SE"
+    NO = "NO"
+    FI = "FI"
 
     def __repr__(self):
         return self.value.lower()
@@ -65,14 +68,35 @@ class PodMeRegion(IntEnum):
         return PodMeLanguage[self.name]
 
 
+class PodMeLoginType(IntEnum):
+    """Enumeration of PodMe login types."""
+
+    PODME_ACCOUNT = 0
+    APPLE = 1
+    GOOGLE = 2
+    FACEBOOK = 3
+    SCHIBSTED_SE = 4
+    SCHIBSTED_FI = 5
+    SCHIBSTED_NO = 6
+
+
+class PodMeSortModeSavedList(IntEnum):
+    """Enumeration of SortModeSavedList."""
+
+    LATEST_ADDED = 0
+    OLDEST_ADDED = 1
+    LATEST_RELEASED = 2
+    OLDEST_RELEASED = 3
+
+
 class PodMeDownloadProgressTask(StrEnum):
     """Enumeration of PodMe download progress tasks."""
 
-    INITIALIZE = auto()
-    RESOLVE_URL = auto()
-    DOWNLOAD_FILE = auto()
-    TRANSCODE_FILE = auto()
-    COMPLETE = auto()
+    INITIALIZE = "INITIALIZE"
+    RESOLVE_URL = "RESOLVE_URL"
+    DOWNLOAD_FILE = "DOWNLOAD_FILE"
+    TRANSCODE_FILE = "TRANSCODE_FILE"
+    COMPLETE = "COMPLETE"
 
 
 @dataclass
@@ -237,6 +261,19 @@ class PodMePodcastBase(BaseDataClassORJSONMixin):
     slug: str
     image_url: str | None = field(default=None, metadata=field_options(alias="imageUrl"))
 
+    @classmethod
+    def from_search_result(cls: type[T], data: dict) -> T:
+        search_result = PodMeSearchResult.from_dict(data)
+        return PodMePodcastBase.from_dict(
+            {
+                "id": search_result.podcast_id,
+                "title": search_result.podcast_title,
+                "is_premium": search_result.is_premium,
+                "slug": search_result.slug,
+                "image_url": search_result.image_url,
+            }
+        )
+
 
 @dataclass
 class PodMePodcast(PodMePodcastBase):
@@ -338,17 +375,20 @@ class PodMeEpisode(PodMeEpisodeBase):
     medium_image_url: str = field(metadata=field_options(alias="mediumImageUrl"))
     stream_url: str | None = field(default=None, metadata=field_options(alias="streamUrl"))
     slug: str | None = None
-    current_spot: time = field(
+    current_spot: time | None = field(
+        default=None,
         metadata=field_options(
             alias="currentSpot",
             deserialize=time.fromisoformat,
             serialize=time.isoformat,
-        )
+        ),
     )
-    current_spot_sec: int = field(metadata=field_options(alias="currentSpotSec"))
-    episode_can_be_played: bool = field(metadata=field_options(alias="episodeCanBePlayed"))
+    current_spot_sec: int | None = field(default=None, metadata=field_options(alias="currentSpotSec"))
+    episode_can_be_played: bool | None = field(
+        default=None, metadata=field_options(alias="episodeCanBePlayed")
+    )
     only_as_package_subscription: bool = field(metadata=field_options(alias="onlyAsPackageSubscription"))
-    has_completed: bool = field(metadata=field_options(alias="hasCompleted"))
+    has_completed: bool | None = field(default=None, metadata=field_options(alias="hasCompleted"))
     is_rss: bool | None = field(default=None, metadata=field_options(alias="isRss"))
     total_no_of_episodes: int | None = field(default=None, metadata=field_options(alias="totalNoOfEpisodes"))
 
@@ -357,21 +397,73 @@ class PodMeEpisode(PodMeEpisodeBase):
 class PodMeEpisodeData(PodMeEpisode):
     """Represents detailed data for a PodMe episode."""
 
-    number: int = field(metadata=field_options(alias="number"))
-    byte_length: int = field(metadata=field_options(alias="byteLength"))
-    url: str = field(metadata=field_options(alias="url"))
-    type: str = field(metadata=field_options(alias="type"))
-    smooth_streaming_url: str = field(metadata=field_options(alias="smoothStreamingUrl"))
-    mpeg_dash_url: str = field(metadata=field_options(alias="mpegDashUrl"))
-    hls_v3_url: str = field(metadata=field_options(alias="hlsV3Url"))
-    hls_v4_url: str = field(metadata=field_options(alias="hlsV4Url"))
-    publish_date: datetime = field(metadata=field_options(alias="publishDate"))
-    has_played: bool = field(metadata=field_options(alias="hasPlayed"))
-    episode_created_at: datetime = field(metadata=field_options(alias="episodeCreatedAt"))
-    episode_updated_at: datetime = field(metadata=field_options(alias="episodeUpdatedAt"))
-    podcast_image_url: str = field(metadata=field_options(alias="podcastImageUrl"))
+    number: int | None = field(default=None, metadata=field_options(alias="number"))
+    byte_length: int | None = field(default=None, metadata=field_options(alias="byteLength"))
+    url: str | None = field(default=None, metadata=field_options(alias="url"))
+    type: str | None = field(default=None, metadata=field_options(alias="type"))
+    smooth_streaming_url: str | None = field(default=None, metadata=field_options(alias="smoothStreamingUrl"))
+    mpeg_dash_url: str | None = field(default=None, metadata=field_options(alias="mpegDashUrl"))
+    hls_v3_url: str | None = field(default=None, metadata=field_options(alias="hlsV3Url"))
+    hls_v4_url: str | None = field(default=None, metadata=field_options(alias="hlsV4Url"))
+    publish_date: datetime | None = field(default=None, metadata=field_options(alias="publishDate"))
+    has_played: bool | None = field(default=None, metadata=field_options(alias="hasPlayed"))
+    episode_created_at: datetime | None = field(
+        default=None, metadata=field_options(alias="episodeCreatedAt")
+    )
+    episode_updated_at: datetime | None = field(
+        default=None, metadata=field_options(alias="episodeUpdatedAt")
+    )
+    podcast_image_url: str | None = field(default=None, metadata=field_options(alias="podcastImageUrl"))
     play_info_updated_at: datetime | None = field(
         default=None, metadata=field_options(alias="playInfoUpdatedAt")
+    )
+
+
+@dataclass
+class PodMeUserPrivacySettings(BaseDataClassORJSONMixin):
+    """Represents privacy settings for a PodMe user."""
+
+    has_opted_out_from_targeted_advertising: bool = field(
+        metadata=field_options(alias="hasOptedOutFromTargetedAdvertising")
+    )
+    has_opted_out_from_personalized_news: bool = field(
+        metadata=field_options(alias="hasOptedOutFromPersonalizedNews")
+    )
+    has_opted_out_from_analytics_and_product_development: bool = field(
+        metadata=field_options(alias="hasOptedOutFromAnalyticsAndProductDevelopment")
+    )
+    has_opted_out_from_marketing_3_rd_party_platforms: bool = field(
+        metadata=field_options(alias="hasOptedOutFromMarketing3RdPartyPlatforms")
+    )
+
+
+@dataclass
+class PodMeUser(BaseDataClassORJSONMixin):
+    """Represents a PodMe user."""
+
+    user_id: str = field(metadata=field_options(alias="userId"))
+    user_account_id: str = field(metadata=field_options(alias="userAccountId"))
+    email: str
+    region: PodMeRegion
+    login_type: int = field(metadata=field_options(alias="loginType"))
+    is_user_schibsted: bool = field(metadata=field_options(alias="isUserSchibsted"))
+    is_user_account_schibsted: bool = field(metadata=field_options(alias="isUserAccountSchibsted"))
+    is_premium_user: bool = field(metadata=field_options(alias="isPremiumUser"))
+    subscription_platform: int = field(metadata=field_options(alias="subscriptionPlatform"))
+    has_given_consent_to_marketing_cookies: bool = field(
+        metadata=field_options(alias="hasGivenConsentToMarketingCookies")
+    )
+    has_given_consent_to_analytics_cookies: bool = field(
+        metadata=field_options(alias="hasGivenConsentToAnalyticsCookies")
+    )
+    privacy_settings: PodMeUserPrivacySettings = field(metadata=field_options(alias="privacySettings"))
+    consent_given_at: datetime | None = field(
+        default=None,
+        metadata=field_options(
+            alias="consentGivenAt",
+            deserialize=datetime.fromisoformat,
+            serialize=datetime.isoformat,
+        ),
     )
 
 
@@ -393,15 +485,16 @@ class PodMeSubscriptionPlan(BaseDataClassORJSONMixin):
     next_plan_product_id: float | None = field(
         default=None, metadata=field_options(alias="nextPlanProductId")
     )
-    price: int | None = field(default=None)
+    region_id: int | None = field(default=None, metadata=field_options(alias="regionId"))
 
 
-@dataclass
+@dataclass(kw_only=True)
 class PodMeSubscription(BaseDataClassORJSONMixin):
     """Represents a PodMe subscription."""
 
+    subscription_id: int | None = field(default=None, metadata=field_options(alias="subscriptionId"))
+    subscription_type: int | None = field(default=None, metadata=field_options(alias="subscriptionType"))
     subscription_state: int = field(metadata=field_options(alias="subscriptionState"))
-    subscription_type: int = field(metadata=field_options(alias="subscriptionType"))
     subscription_platform: int = field(metadata=field_options(alias="subscriptionPlatform"))
     expiration_date: datetime = field(
         metadata=field_options(
@@ -418,12 +511,28 @@ class PodMeSubscription(BaseDataClassORJSONMixin):
         )
     )
     will_be_renewed: bool = field(metadata=field_options(alias="willBeRenewed"))
-    subscription_plan: PodMeSubscriptionPlan = field(metadata=field_options(alias="subscriptionPlan"))
-    discriminator: str
+    subscription_plan: PodMeSubscriptionPlan | None = field(
+        default=None, metadata=field_options(alias="subscriptionPlan")
+    )
+    discriminator: str | None = None
     reward_month_credit: str | None = field(default=None, metadata=field_options(alias="rewardMonthCredit"))
     image_url: str | None = field(default=None, metadata=field_options(alias="imageUrl"))
     podcast_id: int | None = field(default=None, metadata=field_options(alias="podcastId"))
     podcast_title: str | None = field(default=None, metadata=field_options(alias="podcastTitle"))
+    amount: float | None = None
+
+
+@dataclass
+class PodMeSubscriptions(BaseDataClassORJSONMixin):
+    """Represents subscriptions for a PodMe user."""
+
+    has_access: bool = field(metadata=field_options(alias="hasAccess"))
+    adyen_subscriptions: list[PodMeSubscription] = field(metadata=field_options(alias="adyenSubscriptions"))
+    apple_subscriptions: list[PodMeSubscription] = field(metadata=field_options(alias="appleSubscriptions"))
+    google_subscriptions: list[PodMeSubscription] = field(metadata=field_options(alias="googleSubscriptions"))
+    schibsted_subscription: PodMeSubscription | None = field(
+        default=None, metadata=field_options(alias="schibstedSubscription")
+    )
 
 
 class FetchedFileInfo(TypedDict):

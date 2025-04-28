@@ -41,9 +41,9 @@ async def test_async_get_access_token_with_expired_credentials(
     aresponses: ResponsesMockServer, podme_default_auth_client, expired_credentials, refreshed_credentials
 ):
     aresponses.add(
-        URL(PODME_BASE_URL).host,
-        "/auth/refreshSchibstedSession",
-        "GET",
+        URL(PODME_AUTH_BASE_URL).host,
+        "/oauth/token",
+        "POST",
         json_response(data=refreshed_credentials.to_dict()),
     )
     async with podme_default_auth_client(credentials=expired_credentials) as auth_client:
@@ -69,9 +69,9 @@ async def test_refresh_token_success(
 ):
     # Mock the refresh token endpoint
     aresponses.add(
-        URL(PODME_BASE_URL).host,
-        "/auth/refreshSchibstedSession",
-        "GET",
+        URL(PODME_AUTH_BASE_URL).host,
+        "/oauth/token",
+        "POST",
         json_response(data=refreshed_credentials.to_dict()),
     )
     async with podme_default_auth_client() as auth_client:
@@ -83,7 +83,7 @@ async def test_refresh_token_failure(aresponses: ResponsesMockServer, podme_defa
     # Mock the refresh token endpoint to return an error
     aresponses.add(
         URL(PODME_BASE_URL).host,
-        "/auth/refreshSchibstedSession",
+        "/oauth/token",
         "GET",
         aresponses.Response(text="Unauthorized", status=401),
     )

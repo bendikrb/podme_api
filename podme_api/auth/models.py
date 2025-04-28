@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TypedDict
 
 from mashumaro import field_options
 
@@ -27,10 +28,11 @@ class SchibstedCredentials(BaseDataClassORJSONMixin):
     expires_in: int
     id_token: str
     expiration_time: datetime = field(
+        compare=False,
         metadata=field_options(
             deserialize=datetime.fromtimestamp,
             serialize=lambda v: int(datetime.timestamp(v)),
-        )
+        ),
     )
     account_created: bool | None = field(default=None, metadata=field_options(alias="accountCreated"))
     email: str | None = None
@@ -78,3 +80,15 @@ class PodMeBffData(BaseDataClassORJSONMixin):
     pulse: dict
     re_captcha_site_key: str = field(metadata=field_options(alias="reCaptchaSiteKey"))
     spid_url: str = field(metadata=field_options(alias="spidUrl"))
+
+
+class PyTestHttpFixture(TypedDict):
+    """Represents a PyTest HTTP fixture."""
+
+    no: int
+    status: int
+    headers: dict[str, str]
+    body: str
+    method: str
+    url: str
+    fixture_name: str
