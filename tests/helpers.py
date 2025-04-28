@@ -3,7 +3,7 @@ from __future__ import annotations
 from base64 import b64decode
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from aiohttp.web_response import json_response
 from aresponses import ResponsesMockServer
@@ -14,20 +14,21 @@ from aresponses.utils import ANY, _text_matches_pattern
 import orjson
 from yarl import URL
 
-from podme_api.const import PODME_API_URL, PODME_AUTH_BASE_URL, PODME_AUTH_RETURN_URL, PODME_BASE_URL
+from podme_api.const import PODME_API_URL
 
 if TYPE_CHECKING:
     from podme_api import SchibstedCredentials
+    from podme_api.auth.models import PyTestHttpFixture
 
 PODME_API_PATH = URL(PODME_API_URL).path
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
-def save_fixture(name: str, data: dict):  # pragma: no cover
+def save_fixture(name: str, data: dict | list):  # pragma: no cover
     """Save API response data to a fixture file."""
     file_path = FIXTURE_DIR / f"{name}.json"
-    with open(file_path, "w") as f:
-        f.write(orjson.dumps(data))
+    with open(file_path, "wb") as f:
+        f.write(orjson.dumps(data, option=orjson.OPT_NON_STR_KEYS))
 
 
 def load_fixture(name: str) -> str:
@@ -38,7 +39,7 @@ def load_fixture(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def load_fixture_json(name: str) -> dict | list:
+def load_fixture_json(name: str):
     """Load a fixture as JSON."""
     data = load_fixture(name)
     return orjson.loads(data)
@@ -115,88 +116,44 @@ class CustomRoute(Route):  # pragma: no cover
         return True
 
 
-def setup_auth_mocks(aresponses: ResponsesMockServer, credentials: SchibstedCredentials):
-    auth_flow = load_fixture_json("auth_flow")
-
-    # GET oauth/authorize
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/oauth/authorize",
-        "GET",
-        aresponses.Response(body=auth_flow["login_form"]),
-        repeat=float("inf"),
-    )
-
-    # POST authn/api/settings/csrf
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/authn/api/settings/csrf",
-        "GET",
-        json_response(data=auth_flow["csrf"]),
-        repeat=float("inf"),
-    )
-
-    # POST authn/api/identity/email-status
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/authn/api/identity/email-status",
-        "POST",
-        json_response(data=auth_flow["email_status"]),
-        repeat=float("inf"),
-    )
-
-    # POST authn/api/identity/login/
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/authn/api/identity/login/",
-        "POST",
-        json_response(data=auth_flow["login"]),
-        repeat=float("inf"),
-    )
-
-    # POST authn/identity/finish/
-    # redirect_state = quote_plus(json.dumps({""))
-    redirect_state = f"%7B%22returnUrl%22%3A%22{quote_plus(PODME_AUTH_RETURN_URL)}%22%7D"
-    redirect_qs = f"code=testCode&state={redirect_state}"
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/authn/identity/finish/",
-        "POST",
-        aresponses.Response(
-            status=302,
-            headers={
-                "Location": f"{PODME_BASE_URL}/auth/handleSchibstedLogin?{redirect_qs}",
-            },
-        ),
-        repeat=float("inf"),
-    )
-
-    # GET https://podme.com/auth/handleSchibstedLogin
-    default_credentials_json = credentials.to_json()
-    mock_response = aresponses.Response(
-        status=307,
-        headers={
-            "Location": PODME_AUTH_RETURN_URL,
-        },
-    )
-    mock_response.set_cookie("jwt-cred", default_credentials_json)
-    aresponses.add(
-        URL(PODME_BASE_URL).host,
-        "/auth/handleSchibstedLogin",
-        "GET",
-        mock_response,
-        repeat=float("inf"),
-    )
-
-    aresponses.add(
-        URL(PODME_AUTH_RETURN_URL).host,
-        URL(PODME_AUTH_RETURN_URL).path,
-        "GET",
-        aresponses.Response(
-            body=auth_flow["final_html"],
-        ),
-        repeat=float("inf"),
-    )
+def setup_auth_mocks(aresponses: ResponsesMockServer, credentials: SchibstedCredentials | None = None):
+    filter_headers = [
+        "Content-Type",
+        "Location",
+        "Set-Cookie",
+        "RateLimit-Limit",
+        "RateLimit-Remaining",
+        "RateLimit-Reset",
+        "x-session-id",
+    ]
+    auth_flow = [
+        "authorize_1_oauth-authorize",
+        "authorize_2_login",
+        "authorize_3_authn-api-settings-csrf",
+        "authorize_4_authn-api-identity-email-status",
+        "authorize_5_authn-api-identity-login",
+        "authorize_6_authn-identity-finish",
+        "authorize_7_oauth-finalize",
+        "authorize_8_oauth-token",
+    ]
+    for step in auth_flow:
+        fixture: PyTestHttpFixture = load_fixture_json(step)
+        url = URL(fixture["url"])
+        headers = {h: fixture["headers"][h] for h in filter_headers if h in fixture["headers"]}
+        response = aresponses.Response(
+            status=fixture["status"],
+            body=fixture["body"],
+            headers=headers,
+        )
+        if credentials is not None and step == "authorize_8_oauth-token":
+            response = json_response(data=credentials.to_dict())
+        aresponses.add(
+            url.host,
+            url.path,
+            fixture["method"],
+            response,
+            repeat=float("inf"),
+        )
 
 
 def setup_stream_mocks(
@@ -210,13 +167,13 @@ def setup_stream_mocks(
 ):
     if no_stream_urls:
         episodes_fixture = [
-            {k: v for k, v in ep.items() if k not in ["streamUrl"]} for ep in episodes_fixture
+            {k: v for k, v in ep.items() if k not in ["smoothStreamingUrl"]} for ep in episodes_fixture
         ]
 
     aresponses.add(
         route=CustomRoute(
             host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_pattern=f"{PODME_API_PATH}/v2/episodes/continue",
             path_qs={"page": 0},
             method_pattern="GET",
         ),
@@ -225,7 +182,7 @@ def setup_stream_mocks(
     aresponses.add(
         route=CustomRoute(
             host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/episode/currentlyplaying",
+            path_pattern=f"{PODME_API_PATH}/v2/episodes/continue",
             path_qs={"page": 1},
             method_pattern="GET",
         ),
@@ -239,7 +196,7 @@ def setup_stream_mocks(
     }
 
     for episode_fixture in episodes_fixture:
-        stream_url = URL(episode_fixture.get("streamUrl", ""))
+        stream_url = URL(episode_fixture.get("smoothStreamingUrl") or episode_fixture.get("url"))
         if "m3u8" in stream_url.path:
             resp = {
                 "body": m3u8_fixture["master.m3u8"],
@@ -377,7 +334,8 @@ def setup_stream_mocks(
         # Add response for episode info
         aresponses.add(
             URL(PODME_API_URL).host,
-            f"{PODME_API_PATH}/episode/{episode_fixture["id"]}",
+            f'{PODME_API_PATH}/v2/episodes/{episode_fixture["id"]}',
             "GET",
             json_response(data=episode_fixture),
+            repeat=float("inf"),
         )

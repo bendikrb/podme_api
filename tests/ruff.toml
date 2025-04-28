@@ -1,4 +1,4 @@
-# This extend our general Ruff rules specifically for tests
+# This extends our general Ruff rules specifically for tests
 extend = "../pyproject.toml"
 
 lint.extend-select = [
@@ -12,6 +12,7 @@ lint.extend-ignore = [
     "SLF001",
     "TCH002",
     "PLR2004",
+    "PLR0915",
 ]
 
 lint.pylint.max-branches = 13
