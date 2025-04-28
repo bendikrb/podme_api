@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+from collections.abc import AsyncGenerator
 import contextlib
 import logging
 
@@ -399,7 +400,7 @@ async def search(args) -> None:
 
 
 @contextlib.asynccontextmanager
-async def _get_client(args) -> PodMeClient:
+async def _get_client(args) -> AsyncGenerator[PodMeClient, None]:
     """Return PodMeClient based on args."""
     if hasattr(args, "username") and hasattr(args, "password"):
         user_creds = PodMeUserCredentials(args.username, args.password)
