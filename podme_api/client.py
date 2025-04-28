@@ -39,7 +39,7 @@ from podme_api.exceptions import (
     PodMeApiStreamUrlNotFoundError,
     PodMeApiUnauthorizedError,
 )
-from podme_api.helpers import async_cache, get_total_seconds
+from podme_api.helpers import async_cache, fetch_with_redirects, get_total_seconds
 from podme_api.models import (
     PodMeCategory,
     PodMeCategoryPage,
@@ -431,7 +431,12 @@ class PodMeClient:
         self._ensure_session()
 
         try:
-            resp = await self.session.get(download_url, raise_for_status=True)
+            resp = await fetch_with_redirects(
+                download_url,
+                self.session,
+                headers={"User-Agent": PODME_API_USER_AGENT},
+                raise_for_status=True,
+            )
             total_size = int(resp.headers.get("Content-Length", 0))
             on_progress(PodMeDownloadProgressTask.DOWNLOAD_FILE, str(download_url), 0, total_size)
             current_size = 0
