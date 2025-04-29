@@ -228,32 +228,15 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             allow_redirects=False,
         )
         # Login: step 1/3
-        await self._request("", METH_GET, response.headers.get("Location"))
-        # Login: step 2/4
+        await self._request("", base_url=response.headers.get("Location"))
+        # Login: step 2/3
         response = await self._request(
             "authn/api/settings/csrf",
             params={"client_id": self.client_id},
         )
         csrf_token = (await response.json())["data"]["attributes"]["csrfToken"]
 
-        # Login: step 3/4
-        response = await self._request(
-            "authn/api/identity/email-status",
-            method=METH_POST,
-            params={"client_id": self.client_id},
-            headers={
-                "X-CSRF-Token": csrf_token,
-                "Accept": "application/json",
-            },
-            data={
-                "email": user_credentials.email,
-                "deviceData": json.dumps(self.device_data),
-            },
-        )
-        email_status = await response.json()
-        _LOGGER.debug(f"Email status: {email_status}")
-
-        # Login: step 4/4
+        # Login: step 3/3
         response = await self._request(
             "authn/api/identity/login/",
             method=METH_POST,
@@ -290,7 +273,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         )
 
         # Follow redirect manually
-        response = await self._request("", METH_GET, response.headers.get("Location"), allow_redirects=False)
+        response = await self._request("", base_url=response.headers.get("Location"), allow_redirects=False)
         code = URL(response.headers.get("Location")).query.get("code")
 
         # Request tokens with authorization code
