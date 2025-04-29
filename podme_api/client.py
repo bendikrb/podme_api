@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from http import HTTPStatus
@@ -344,6 +345,8 @@ class PodMeClient:
         Base Media format). Most likely this can be solved in better ways, but this will do for now.
         If the audio is served to clients in the original container (version 5 as of now), they will
         be very confused about the total duration of the file, for some reason...
+        We also remove any metadata from the file prior to transcoding, mainly to avoid issues with
+        badly encoded Unicode data in there.
 
         Args:
             input_file (PathLike | str): The path to the audio file.
@@ -359,10 +362,29 @@ class PodMeClient:
 
         if output_file is None:  # pragma: no cover
             output_file = input_file.with_stem(f"{input_file.stem}_out")
+        output_interim_file = input_file.with_stem(f"{input_file.stem}_interim")
 
         transcode_options = transcode_options or {}
 
         try:
+            _LOGGER.debug("Clearing metadata from file: %s", input_file.name)
+            with contextlib.suppress(UnicodeDecodeError):
+                await (
+                    FFmpeg()
+                    .input(input_file)
+                    .output(
+                        output_interim_file,
+                        {
+                            "map_metadata": "-1",
+                            "c": "copy",
+                        },
+                    )
+                    .execute()
+                )
+
+            input_file.unlink()
+            output_interim_file.rename(input_file)
+
             ffprobe = FFmpeg(executable="ffprobe").input(
                 input_file,
                 print_format="json",
