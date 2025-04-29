@@ -120,16 +120,12 @@ def pytest_configure(config):  # pragma: no cover
                 save_fixture("v2_subscriptions", subscriptions)
 
                 # get_user_podcasts()
-                userpods = await client._request(
-                    "v2/podcasts/mypodcasts",
-                    params={"page": 0, "pageSize": 2},
-                )
+                userpods = await client._request("v2/podcasts/mypodcasts", params={"page": 0, "pageSize": 2})
                 save_fixture("v2_podcasts_mypodcasts", userpods)
 
                 # get_saved_episodes()
                 saved_list = await client._request(
-                    "v2/playlist/saved-list",
-                    params={"page": 0, "pageSize": 2},
+                    "v2/playlist/saved-list", params={"page": 0, "pageSize": 2}
                 )
                 save_fixture("v2_playlist_saved-list", saved_list)
 
@@ -159,8 +155,8 @@ def pytest_configure(config):  # pragma: no cover
                 save_fixture("v2_podcasts_search_222-page2", results)
 
                 # get_podcast_info()
-                results = await client._request("v2/podcasts/slug/aftenpodden")
-                save_fixture("v2_podcasts_slug_aftenpodden", results)
+                results = await client._request("v2/podcast/slug/aftenpodden", web_api=True)
+                save_fixture("v2_podcast_slug_aftenpodden", results)
 
                 # get_episode_info()
                 results = await client._request("v2/episodes/3612514")
@@ -168,20 +164,17 @@ def pytest_configure(config):  # pragma: no cover
 
                 # search_podcast()
                 results = await client._request(
-                    "v2/podcasts/search",
-                    params={"searchText": "podden", "pageSize": 2, "page": 0},
+                    "v2/podcasts/search", params={"searchText": "podden", "pageSize": 2, "page": 0}
                 )
                 save_fixture("v2_podcasts_search-podden-page1", results)
 
                 # get_episode_list()
                 results1 = await client._request(
-                    "v2/episodes/podcast/1727",
-                    params={"page": 0, "pageSize": 2},
+                    "v2/episodes/podcast/1727", params={"page": 0, "pageSize": 2}
                 )
                 save_fixture("v2_episodes_podcast_aftenpodden-page1", results1)
                 results2 = await client._request(
-                    "v2/episodes/podcast/1727",
-                    params={"page": 1, "pageSize": 2},
+                    "v2/episodes/podcast/1727", params={"page": 1, "pageSize": 2}
                 )
                 save_fixture("v2_episodes_podcast_aftenpodden-page2", results2)
 
@@ -189,15 +182,11 @@ def pytest_configure(config):  # pragma: no cover
                 auth_fixtures = auth_client.get_pytest_recordings()
                 for sess_name in auth_fixtures:
                     for rec in auth_fixtures[sess_name]:
-                        if rec["fixture_name"] == "authorize_4_authn-api-identity-email-status":
-                            body = orjson.loads(rec["body"])
-                            body["data"]["attributes"]["email"] = mock_credentials["email"]
-                            rec["body"] = orjson.dumps(body).decode("utf-8")
-                        if rec["fixture_name"] == "authorize_5_authn-api-identity-login":
+                        if rec["fixture_name"] == "authorize_4_authn-api-identity-login":
                             body = orjson.loads(rec["body"])
                             body["meta"]["tracking"]["userIdentifier"] = mock_credentials["user_id"]
                             rec["body"] = orjson.dumps(body).decode("utf-8")
-                        if rec["fixture_name"] == "authorize_6_authn-identity-finish":
+                        if rec["fixture_name"] == "authorize_5_authn-identity-finish":
                             location = URL(rec["headers"]["Location"]).with_query(
                                 {
                                     "data": mock_credentials["id_token"],
@@ -207,7 +196,7 @@ def pytest_configure(config):  # pragma: no cover
                             rec["body"] = (
                                 f'<p>Found. Redirecting to <a href="{location!s}">{location!s}</a></p>'
                             )
-                        if rec["fixture_name"] == "authorize_7_oauth-finalize":
+                        if rec["fixture_name"] == "authorize_6_oauth-finalize":
                             location = URL(rec["headers"]["Location"]).with_query(
                                 {
                                     "code": mock_credentials["code"],
@@ -215,7 +204,7 @@ def pytest_configure(config):  # pragma: no cover
                             )
                             rec["headers"]["Location"] = str(location)
                             rec["body"] = ""
-                        if rec["fixture_name"] == "authorize_8_oauth-token":
+                        if rec["fixture_name"] == "authorize_7_oauth-token":
                             body = orjson.loads(rec["body"])
                             body["access_token"] = mock_credentials["access_token"]
                             body["refresh_token"] = mock_credentials["refresh_token"]

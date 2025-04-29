@@ -17,7 +17,7 @@ import pytest
 from yarl import URL
 
 from podme_api import PodMeClient, PodMeDefaultAuthClient, SchibstedCredentials
-from podme_api.const import PODME_API_URL
+from podme_api.const import PODME_API_BASE_URL
 from podme_api.exceptions import (
     PodMeApiConnectionError,
     PodMeApiConnectionTimeoutError,
@@ -41,7 +41,6 @@ from podme_api.models import (
 )
 
 from .helpers import (
-    PODME_API_PATH,
     CustomRoute,
     load_fixture_json,
     setup_auth_mocks,
@@ -50,6 +49,9 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
+
+API_PATH = "/mobile/api"
+API_WEB_PATH = "/web/api"
 
 
 def test_version():
@@ -61,8 +63,8 @@ def test_version():
 async def test_username(aresponses: ResponsesMockServer, podme_client, default_credentials, user_credentials):
     fixture = load_fixture_json("v2_user")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         json_response(data=fixture),
     )
@@ -79,8 +81,8 @@ async def test_credentials_storage(
 ):
     fixture = load_fixture_json("v2_user")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         json_response(data=fixture),
         repeat=float("inf"),
@@ -133,8 +135,8 @@ async def test_credentials_storage(
 async def test_get_user_subscription(aresponses: ResponsesMockServer, podme_client):
     fixture = load_fixture_json("v2_subscriptions")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/subscriptions",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/subscriptions",
         "GET",
         json_response(data=fixture),
     )
@@ -150,8 +152,8 @@ async def test_get_user_podcasts(aresponses: ResponsesMockServer, podme_client):
     aresponses.add(
         response=json_response(data=fixture),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/mypodcasts",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/mypodcasts",
             path_qs={"page": 0},
             method_pattern="GET",
         ),
@@ -159,8 +161,8 @@ async def test_get_user_podcasts(aresponses: ResponsesMockServer, podme_client):
     aresponses.add(
         response=json_response(data=[]),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/mypodcasts",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/mypodcasts",
             path_qs={"page": 1},
             method_pattern="GET",
         ),
@@ -175,8 +177,8 @@ async def test_get_user_podcasts(aresponses: ResponsesMockServer, podme_client):
 async def test_get_user_podcasts_error(aresponses: ResponsesMockServer, podme_client):
     aresponses.add(
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/mypodcasts",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/mypodcasts",
             path_qs={"page": 0},
             method_pattern="GET",
         ),
@@ -193,8 +195,8 @@ async def test_get_currently_playing(aresponses: ResponsesMockServer, podme_clie
     aresponses.add(
         response=json_response(data=fixture),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/episodes/continue",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/episodes/continue",
             path_qs={"page": 0},
             method_pattern="GET",
         ),
@@ -202,8 +204,8 @@ async def test_get_currently_playing(aresponses: ResponsesMockServer, podme_clie
     aresponses.add(
         response=json_response(data=[]),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/episodes/continue",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/episodes/continue",
             path_qs={"page": 1},
             method_pattern="GET",
         ),
@@ -219,8 +221,8 @@ async def test_get_currently_playing(aresponses: ResponsesMockServer, podme_clie
 async def test_get_categories(aresponses: ResponsesMockServer, podme_client):
     fixture = load_fixture_json("v2_podcasts_categories")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/categories",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/podcasts/categories",
         "GET",
         json_response(data=fixture),
     )
@@ -240,8 +242,8 @@ async def test_get_categories(aresponses: ResponsesMockServer, podme_client):
 async def test_get_category(aresponses: ResponsesMockServer, podme_client, category_id, category_key):
     fixture = load_fixture_json("v2_podcasts_categories")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/categories",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/podcasts/categories",
         "GET",
         json_response(data=fixture),
     )
@@ -256,8 +258,8 @@ async def test_get_category(aresponses: ResponsesMockServer, podme_client, categ
 async def test_get_category_nonexistent(aresponses: ResponsesMockServer, podme_client):
     fixture = load_fixture_json("v2_podcasts_categories")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/categories",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/podcasts/categories",
         "GET",
         json_response(data=fixture),
     )
@@ -283,8 +285,8 @@ async def test_get_podcasts_by_category(aresponses: ResponsesMockServer, podme_c
     aresponses.add(
         response=json_response(data=fixture_page1),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/search",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/search",
             path_qs={"categoryId": 222, "premium": "true", "pageSize": 10, "page": 0},
             method_pattern="GET",
         ),
@@ -292,8 +294,8 @@ async def test_get_podcasts_by_category(aresponses: ResponsesMockServer, podme_c
     aresponses.add(
         response=json_response(data=fixture_page2),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/search",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/search",
             path_qs={"categoryId": 222, "premium": "true", "pageSize": 10, "page": 1},
             method_pattern="GET",
         ),
@@ -316,8 +318,8 @@ async def test_podcast_subscription(aresponses: ResponsesMockServer, podme_clien
     aresponses.add(
         response=json_response(data=fixture),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/mypodcasts",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/mypodcasts",
             path_qs={"page": 0},
             method_pattern="GET",
         ),
@@ -325,27 +327,27 @@ async def test_podcast_subscription(aresponses: ResponsesMockServer, podme_clien
     aresponses.add(
         response=json_response(data=[]),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/mypodcasts",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/mypodcasts",
             path_qs={"page": 1},
             method_pattern="GET",
         ),
     )
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/bookmarks/{podcast_id}",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/podcasts/bookmarks/{podcast_id}",
         "GET",
         json_response(False),
     )
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/bookmarks/{podcast_id}",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/podcasts/bookmarks/{podcast_id}",
         "POST",
         response=Response(status=201),
     )
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/bookmarks/{podcast_id}",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/podcasts/bookmarks/{podcast_id}",
         "DELETE",
         response=Response(body="", status=200),
     )
@@ -370,8 +372,8 @@ async def test_podcast_subscription(aresponses: ResponsesMockServer, podme_clien
 )
 async def test_scrobble_episode(aresponses: ResponsesMockServer, podme_client, episode_id, progress):
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v3/episodes/player-update",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v3/episodes/player-update",
         "POST",
         Response(body=""),
     )
@@ -388,10 +390,10 @@ async def test_scrobble_episode(aresponses: ResponsesMockServer, podme_client, e
     ],
 )
 async def test_get_podcast_info(aresponses: ResponsesMockServer, podme_client, podcast_slug):
-    fixture = load_fixture_json(f"v2_podcasts_slug_{podcast_slug}")
+    fixture = load_fixture_json(f"v2_podcast_slug_{podcast_slug}")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/slug/{podcast_slug}",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_WEB_PATH}/v2/podcast/slug/{podcast_slug}",
         "GET",
         json_response(data=fixture),
         repeat=2,
@@ -417,8 +419,8 @@ async def test_get_podcast_info(aresponses: ResponsesMockServer, podme_client, p
 async def test_get_episode_info(aresponses: ResponsesMockServer, podme_client, episode_id):
     fixture = load_fixture_json(f"v2_episodes_{episode_id}")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/episodes/{episode_id}",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/episodes/{episode_id}",
         "GET",
         json_response(data=fixture),
         repeat=2,
@@ -447,8 +449,8 @@ async def test_search_podcast(aresponses: ResponsesMockServer, podme_client, sea
     aresponses.add(
         response=json_response(data=fixture_page1),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/search",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/search",
             path_qs={"searchText": search_query, "pageSize": 2, "page": 0},
             method_pattern="GET",
         ),
@@ -456,8 +458,8 @@ async def test_search_podcast(aresponses: ResponsesMockServer, podme_client, sea
     aresponses.add(
         response=json_response(data=fixture_page1),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/podcasts/search",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/podcasts/search",
             path_qs={"searchText": search_query, "pageSize": 2, "page": 1},
             method_pattern="GET",
         ),
@@ -481,12 +483,12 @@ async def test_get_episode_list(aresponses: ResponsesMockServer, podme_client, p
     page_size = 2
     fixture_page1 = load_fixture_json(f"v2_episodes_podcast_{podcast_slug}-page1")
     fixture_page2 = load_fixture_json(f"v2_episodes_podcast_{podcast_slug}-page2")
-    fixture_podcast = load_fixture_json(f"v2_podcasts_slug_{podcast_slug}")
+    fixture_podcast = load_fixture_json(f"v2_podcast_slug_{podcast_slug}")
     aresponses.add(
         response=json_response(data=fixture_page1),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/episodes/podcast/{fixture_podcast['id']}",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/episodes/podcast/{fixture_podcast['id']}",
             path_qs={"page": 0},
             method_pattern="GET",
             repeat=3,
@@ -495,8 +497,8 @@ async def test_get_episode_list(aresponses: ResponsesMockServer, podme_client, p
     aresponses.add(
         response=json_response(data=fixture_page2),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/episodes/podcast/{fixture_podcast['id']}",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/episodes/podcast/{fixture_podcast['id']}",
             path_qs={"page": 1},
             method_pattern="GET",
             repeat=3,
@@ -505,16 +507,16 @@ async def test_get_episode_list(aresponses: ResponsesMockServer, podme_client, p
     aresponses.add(
         response=json_response(data=[]),
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
-            path_pattern=f"{PODME_API_PATH}/v2/episodes/podcast/{fixture_podcast['id']}",
+            host_pattern=URL(PODME_API_BASE_URL).host,
+            path_pattern=f"{API_PATH}/v2/episodes/podcast/{fixture_podcast['id']}",
             path_qs={"page": 2},
             method_pattern="GET",
             repeat=3,
         ),
     )
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/podcasts/slug/{podcast_slug}",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_WEB_PATH}/v2/podcast/slug/{podcast_slug}",
         "GET",
         json_response(data=fixture_podcast),
         repeat=float("inf"),
@@ -699,8 +701,8 @@ async def test_transcode_no_ffmpeg(monkeypatch, podme_client):
 async def test_no_content(aresponses: ResponsesMockServer, podme_client):
     """Test HTTP 201 response handling."""
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         aresponses.Response(status=204),
     )
@@ -720,8 +722,8 @@ async def test_timeout(aresponses: ResponsesMockServer, podme_client):
         return aresponses.Response(body="Helluu")  # pragma: no cover
 
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         response_handler,
     )
@@ -735,8 +737,8 @@ async def test_timeout(aresponses: ResponsesMockServer, podme_client):
 async def test_http_error400(aresponses: ResponsesMockServer, podme_client):
     """Test HTTP 400 response handling."""
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         aresponses.Response(text="Wtf", status=400),
     )
@@ -750,8 +752,8 @@ async def test_http_error401(aresponses: ResponsesMockServer, podme_client, defa
     """Test HTTP 401 response handling."""
     # setup_auth_mocks(aresponses, default_credentials)
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         aresponses.Response(status=401),
     )
@@ -768,14 +770,14 @@ async def test_http_error401_with_retry(
     setup_auth_mocks(aresponses, default_credentials)
     fixture = load_fixture_json("v2_user")
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         aresponses.Response(status=401),
     )
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         json_response(data=fixture),
     )
@@ -788,8 +790,8 @@ async def test_http_error401_with_retry(
 async def test_http_error404(aresponses: ResponsesMockServer, podme_client):
     """Test HTTP 404 response handling."""
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         aresponses.Response(text="Not found", status=404),
     )
@@ -803,8 +805,8 @@ async def test_http_error404(aresponses: ResponsesMockServer, podme_client):
 async def test_http_error429(aresponses: ResponsesMockServer, podme_client):
     """Test HTTP 429 response handling."""
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         aresponses.Response(text="Too many requests", status=429),
     )
@@ -818,8 +820,8 @@ async def test_http_error429(aresponses: ResponsesMockServer, podme_client):
 async def test_json_error(aresponses: ResponsesMockServer, podme_client):
     """Test unexpected error handling."""
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         json_response(data={"message": "Error", "code": 418}, status=500),
     )
@@ -844,8 +846,8 @@ async def test_network_error(podme_client):
 async def test_unexpected_error(aresponses: ResponsesMockServer, podme_client):
     """Test unexpected error handling."""
     aresponses.add(
-        URL(PODME_API_URL).host,
-        f"{PODME_API_PATH}/v2/user",
+        URL(PODME_API_BASE_URL).host,
+        f"{API_PATH}/v2/user",
         "GET",
         aresponses.Response(text="Error", status=418),
     )

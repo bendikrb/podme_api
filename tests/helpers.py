@@ -14,13 +14,13 @@ from aresponses.utils import ANY, _text_matches_pattern
 import orjson
 from yarl import URL
 
-from podme_api.const import PODME_API_URL
+from podme_api.const import PODME_API_BASE_URL
 
 if TYPE_CHECKING:
     from podme_api import SchibstedCredentials
     from podme_api.auth.models import PyTestHttpFixture
 
-PODME_API_PATH = URL(PODME_API_URL).path
+PODME_API_PATH = "/mobile/api"
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
@@ -130,11 +130,10 @@ def setup_auth_mocks(aresponses: ResponsesMockServer, credentials: SchibstedCred
         "authorize_1_oauth-authorize",
         "authorize_2_login",
         "authorize_3_authn-api-settings-csrf",
-        "authorize_4_authn-api-identity-email-status",
-        "authorize_5_authn-api-identity-login",
-        "authorize_6_authn-identity-finish",
-        "authorize_7_oauth-finalize",
-        "authorize_8_oauth-token",
+        "authorize_4_authn-api-identity-login",
+        "authorize_5_authn-identity-finish",
+        "authorize_6_oauth-finalize",
+        "authorize_7_oauth-token",
     ]
     for step in auth_flow:
         fixture: PyTestHttpFixture = load_fixture_json(step)
@@ -172,7 +171,7 @@ def setup_stream_mocks(
 
     aresponses.add(
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
+            host_pattern=URL(PODME_API_BASE_URL).host,
             path_pattern=f"{PODME_API_PATH}/v2/episodes/continue",
             path_qs={"page": 0},
             method_pattern="GET",
@@ -181,7 +180,7 @@ def setup_stream_mocks(
     )
     aresponses.add(
         route=CustomRoute(
-            host_pattern=URL(PODME_API_URL).host,
+            host_pattern=URL(PODME_API_BASE_URL).host,
             path_pattern=f"{PODME_API_PATH}/v2/episodes/continue",
             path_qs={"page": 1},
             method_pattern="GET",
@@ -333,7 +332,7 @@ def setup_stream_mocks(
 
         # Add response for episode info
         aresponses.add(
-            URL(PODME_API_URL).host,
+            URL(PODME_API_BASE_URL).host,
             f'{PODME_API_PATH}/v2/episodes/{episode_fixture["id"]}',
             "GET",
             json_response(data=episode_fixture),

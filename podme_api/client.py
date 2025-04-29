@@ -24,7 +24,7 @@ from yarl import URL
 
 from podme_api.const import (
     DEFAULT_REQUEST_TIMEOUT,
-    PODME_API_URL,
+    PODME_API_BASE_URL,
     PODME_API_USER_AGENT,
 )
 from podme_api.exceptions import (
@@ -160,6 +160,7 @@ class PodMeClient:
         self,
         uri: str,
         method: str = METH_GET,
+        web_api: bool = False,
         retry: int = 0,
         **kwargs,
     ) -> str | dict | list | bool | None:
@@ -168,6 +169,7 @@ class PodMeClient:
         Args:
             uri (str): The URI for the API endpoint.
             method (str): The HTTP method to use for the request.
+            web_api (bool): Use web API instead of the default mobile API.
             retry (int): The number of retries for the request.
             **kwargs: Additional keyword arguments for the request.
                 May include:
@@ -179,14 +181,16 @@ class PodMeClient:
             The response data from the API.
 
         """
-        url = URL(f"{PODME_API_URL.strip('/')}/").join(URL(uri))
+        path_prefix = "web/api" if web_api else "mobile/api"
+        url = URL(PODME_API_BASE_URL.rstrip("/")).join(URL(f"{path_prefix}/{uri}"))
 
-        access_token = await self.auth_client.async_get_access_token()
         headers = {
-            "Authorization": f"Bearer {access_token}",
             **self.request_header,
             **kwargs.get("headers", {}),
         }
+        if not web_api:
+            access_token = await self.auth_client.async_get_access_token()
+            headers.update({"Authorization": f"Bearer {access_token}"})
         kwargs.update({"headers": headers})
 
         params = kwargs.get("params")
@@ -554,9 +558,7 @@ class PodMeClient:
 
     async def get_username(self) -> str:
         """Get the username of the authenticated user."""
-        data = await self._request(
-            "v2/user",
-        )
+        data = await self._request("v2/user")
         user = PodMeUser.from_dict(data)
         return user.email
 
@@ -670,9 +672,7 @@ class PodMeClient:
         if not isinstance(category, PodMeCategory):
             category = await self.get_category(category)
         page_id = f"{self.region.name}_{category.key}"
-        response = await self._request(
-            f"v2/cms/categories-page/{page_id.upper()}",
-        )
+        response = await self._request(f"v2/cms/categories-page/{page_id.upper()}")
         return PodMeCategoryPage.from_dict(response)
 
     async def get_podcasts_by_category(
@@ -703,10 +703,22 @@ class PodMeClient:
         )
         return [PodMePodcastBase.from_search_result(data) for data in results]
 
+    async def get_app_screen(self) -> dict:
+        """Get the app screen content."""
+        return await self._request(
+            "v1/cms/app-screen",
+            params={
+                "screenType": "1",
+            },
+        )
+
     async def get_home_screen(self) -> PodMeHomeScreen:
         """Get the home screen content."""
         response = await self._request(
             "v2/cms/home-screen",
+            headers={
+                "X-Language": self.language.value,
+            },
         )
         return PodMeHomeScreen.from_dict(response)
 
@@ -732,13 +744,14 @@ class PodMeClient:
             category = category.key if isinstance(category, PodMeCategory) else category
 
         podcasts = await self._get_pages(
-            "v2/podcasts/popular",
+            "v2/podcast/popular",
             params={
                 "podcastType": podcast_type,
                 "category": category,
             },
             get_pages=pages,
             page_size=page_size,
+            web_api=True,
         )
 
         return [PodMePodcastBase.from_dict(data) for data in podcasts]
@@ -760,10 +773,7 @@ class PodMeClient:
             podcast_id (int): The ID of the podcast to subscribe to.
 
         """
-        return await self._request(
-            f"v2/podcasts/bookmarks/{podcast_id}",
-            method=METH_POST,
-        )
+        return await self._request(f"v2/podcasts/bookmarks/{podcast_id}", method=METH_POST)
 
     async def unsubscribe_to_podcast(self, podcast_id: int) -> bool:
         """Unsubscribe from a podcast.
@@ -772,10 +782,7 @@ class PodMeClient:
             podcast_id (int): The ID of the podcast to unsubscribe from.
 
         """
-        return await self._request(
-            f"v2/podcasts/bookmarks/{podcast_id}",
-            method=METH_DELETE,
-        )
+        return await self._request(f"v2/podcasts/bookmarks/{podcast_id}", method=METH_DELETE)
 
     async def scrobble_episode(
         self,
@@ -815,10 +822,7 @@ class PodMeClient:
         """
 
         mark_as = "completed" if played else "uncompleted"
-        return await self._request(
-            f"v2/episodes/{episode_id}/{mark_as}",
-            method=METH_PATCH,
-        )
+        return await self._request(f"v2/episodes/{episode_id}/{mark_as}", method=METH_PATCH)
 
     async def mark_podcast_played(self, podcast_id: int, played=True) -> bool:
         """Mark a podcast as played/unplayed.
@@ -913,9 +917,7 @@ class PodMeClient:
             podcast_slug (str): The slug of the podcast.
 
         """
-        data = await self._request(
-            f"v2/podcasts/slug/{podcast_slug}",
-        )
+        data = await self._request(f"v2/podcast/slug/{podcast_slug}", web_api=True)
         return PodMePodcast.from_dict(data)
 
     async def get_podcasts_info(self, podcast_slugs: list[str]) -> list[PodMePodcast]:
@@ -935,9 +937,7 @@ class PodMeClient:
             episode_id (int): The ID of the episode.
 
         """
-        data = await self._request(
-            f"v2/episodes/{episode_id}",
-        )
+        data = await self._request(f"v2/episodes/{episode_id}")
         return PodMeEpisodeData.from_dict(data)
 
     async def get_episodes_info(self, episode_ids: list[int]) -> list[PodMeEpisodeData]:
