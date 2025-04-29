@@ -100,6 +100,10 @@ class PodMeClient:
         PodMeRegion.FI,
     ]
 
+    def __post_init__(self):
+        """Initialize the client after initialization."""
+        self.auth_client.region = self.region
+
     def set_conf_dir(self, conf_dir: PathLike | str) -> None:
         """Set the configuration directory.
 
@@ -267,7 +271,7 @@ class PodMeClient:
         """Generate a header for HTTP requests to the server."""
         return {
             "Accept": "application/json",
-            "X-Region": str(self.region),
+            "X-Region": self.region.name,
             "User-Agent": PODME_API_USER_AGENT,
         }
 
@@ -508,9 +512,10 @@ class PodMeClient:
             episode_data = await self.get_episode_info(episode)
         if episode_data.url is not None:
             return episode_data.id, URL(episode_data.url)
-        if episode_data.stream_url is None:
+        if episode_data.stream_url is None and episode_data.smooth_streaming_url is None:
             raise PodMeApiStreamUrlError(f"No stream URL found for episode {episode_data.id}")
-        info = await self.resolve_stream_url(URL(episode_data.stream_url))
+        stream_url = episode_data.stream_url or episode_data.smooth_streaming_url
+        info = await self.resolve_stream_url(URL(stream_url))
         return episode_data.id, URL(info["url"])
 
     async def get_episode_download_url_bulk(

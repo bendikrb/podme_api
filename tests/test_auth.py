@@ -13,13 +13,14 @@ import pytest
 from yarl import URL
 
 from podme_api import PodMeClient, PodMeDefaultAuthClient
-from podme_api.const import PODME_AUTH_BASE_URL, PODME_BASE_URL
+from podme_api.const import PODME_AUTH_BASE_URL
 from podme_api.exceptions import (
     PodMeApiAuthenticationError,
     PodMeApiConnectionError,
     PodMeApiConnectionTimeoutError,
     PodMeApiError,
 )
+from podme_api.models import PodMeRegion
 
 from .helpers import setup_auth_mocks
 
@@ -40,12 +41,14 @@ async def test_async_get_access_token_with_valid_credentials(podme_default_auth_
 async def test_async_get_access_token_with_expired_credentials(
     aresponses: ResponsesMockServer, podme_default_auth_client, expired_credentials, refreshed_credentials
 ):
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/oauth/token",
-        "POST",
-        json_response(data=refreshed_credentials.to_dict()),
-    )
+    for region in PodMeRegion:
+        base_url = PODME_AUTH_BASE_URL.get(region)
+        aresponses.add(
+            URL(base_url).host,
+            "/oauth/token",
+            "POST",
+            json_response(data=refreshed_credentials.to_dict()),
+        )
     async with podme_default_auth_client(credentials=expired_credentials) as auth_client:
         access_token = await auth_client.async_get_access_token()
         assert access_token == refreshed_credentials.access_token
@@ -68,12 +71,14 @@ async def test_refresh_token_success(
     aresponses: ResponsesMockServer, podme_default_auth_client, default_credentials, refreshed_credentials
 ):
     # Mock the refresh token endpoint
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/oauth/token",
-        "POST",
-        json_response(data=refreshed_credentials.to_dict()),
-    )
+    for region in PodMeRegion:
+        base_url = PODME_AUTH_BASE_URL.get(region)
+        aresponses.add(
+            URL(base_url).host,
+            "/oauth/token",
+            "POST",
+            json_response(data=refreshed_credentials.to_dict()),
+        )
     async with podme_default_auth_client() as auth_client:
         new_credentials = await auth_client.refresh_token(default_credentials)
         assert new_credentials == refreshed_credentials
@@ -81,12 +86,14 @@ async def test_refresh_token_success(
 
 async def test_refresh_token_failure(aresponses: ResponsesMockServer, podme_default_auth_client):
     # Mock the refresh token endpoint to return an error
-    aresponses.add(
-        URL(PODME_BASE_URL).host,
-        "/oauth/token",
-        "GET",
-        aresponses.Response(text="Unauthorized", status=401),
-    )
+    for region in PodMeRegion:
+        base_url = PODME_AUTH_BASE_URL.get(region)
+        aresponses.add(
+            URL(base_url).host,
+            "/oauth/token",
+            "GET",
+            aresponses.Response(text="Unauthorized", status=401),
+        )
 
     async with podme_default_auth_client() as auth_client:
         with pytest.raises(PodMeApiConnectionError):
@@ -135,12 +142,14 @@ async def test_request_timeout(aresponses: ResponsesMockServer, podme_default_au
         await sleep(1)
         return aresponses.Response(body="Helluu")  # pragma: no cover
 
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/oauth/authorize",
-        "GET",
-        response_handler,
-    )
+    for region in PodMeRegion:
+        base_url = PODME_AUTH_BASE_URL.get(region)
+        aresponses.add(
+            URL(base_url).host,
+            "/oauth/authorize",
+            "GET",
+            response_handler,
+        )
     async with podme_default_auth_client() as auth_client:
         auth_client.request_timeout = 0.1
         with pytest.raises(PodMeApiConnectionTimeoutError):
@@ -149,12 +158,14 @@ async def test_request_timeout(aresponses: ResponsesMockServer, podme_default_au
 
 async def test_request_bad_request(aresponses: ResponsesMockServer, podme_default_auth_client):
     # Mock a 400 Bad Request response
-    aresponses.add(
-        URL(PODME_AUTH_BASE_URL).host,
-        "/invalid/endpoint",
-        "GET",
-        aresponses.Response(text="Bad Request", status=400),
-    )
+    for region in PodMeRegion:
+        base_url = PODME_AUTH_BASE_URL.get(region)
+        aresponses.add(
+            URL(base_url).host,
+            "/invalid/endpoint",
+            "GET",
+            aresponses.Response(text="Bad Request", status=400),
+        )
     async with podme_default_auth_client() as auth_client:
         with pytest.raises(PodMeApiError) as exc_info:
             await auth_client._request("invalid/endpoint")

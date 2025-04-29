@@ -87,7 +87,7 @@ class PyTestHttpFixture(TypedDict):
 
     no: int
     status: int
-    headers: dict[str, str]
+    headers: dict
     body: str
     method: str
     url: str

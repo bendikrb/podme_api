@@ -21,6 +21,7 @@ from podme_api.auth.common import PodMeAuthClient
 from podme_api.auth.models import SchibstedCredentials
 from podme_api.const import (
     PODME_AUTH_BASE_URL,
+    PODME_AUTH_CLIENT_ID,
     PODME_AUTH_USER_AGENT,
     PODME_BASE_URL,
 )
@@ -30,14 +31,12 @@ from podme_api.exceptions import (
     PodMeApiConnectionTimeoutError,
     PodMeApiError,
 )
+from podme_api.models import PodMeRegion
 
 if TYPE_CHECKING:
     from podme_api.auth.models import PodMeUserCredentials
 
 _LOGGER = logging.getLogger(__name__)
-
-
-CLIENT_ID = "62557b19f552881812b7431c"
 
 
 @dataclass
@@ -76,6 +75,9 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
     credentials: SchibstedCredentials | None = None
     """(SchibstedCredentials | None): Authentication credentials."""
 
+    region = PodMeRegion.NO
+    """(PodMeRegion): The region setting for the client."""
+
     _credentials: SchibstedCredentials | None = field(default=None, init=False)
     _close_session: bool = False
 
@@ -92,6 +94,14 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             "User-Agent": self.user_agent,
             "Referer": PODME_BASE_URL,
         }
+
+    @property
+    def client_id(self) -> str:
+        return PODME_AUTH_CLIENT_ID.get(self.region)
+
+    @property
+    def base_url(self) -> URL:
+        return URL(PODME_AUTH_BASE_URL.get(self.region))
 
     async def _request(
         self,
@@ -122,7 +132,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
 
         """
         if base_url is None:
-            base_url = PODME_AUTH_BASE_URL
+            base_url = self.base_url
         url = URL(base_url).join(URL(uri))
         headers = {
             **self.request_header,
@@ -205,8 +215,8 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         response = await self._request(
             "oauth/authorize",
             params={
-                "client_id": CLIENT_ID,
-                "redirect_uri": f"pme.podme.{CLIENT_ID}:/login",
+                "client_id": self.client_id,
+                "redirect_uri": f"pme.podme.{self.client_id}:/login",
                 "response_type": "code",
                 "scope": "openid offline_access",
                 "state": hashlib.sha256(os.urandom(1024)).hexdigest(),
@@ -222,7 +232,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         # Login: step 2/4
         response = await self._request(
             "authn/api/settings/csrf",
-            params={"client_id": CLIENT_ID},
+            params={"client_id": self.client_id},
         )
         csrf_token = (await response.json())["data"]["attributes"]["csrfToken"]
 
@@ -230,7 +240,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         response = await self._request(
             "authn/api/identity/email-status",
             method=METH_POST,
-            params={"client_id": CLIENT_ID},
+            params={"client_id": self.client_id},
             headers={
                 "X-CSRF-Token": csrf_token,
                 "Accept": "application/json",
@@ -247,7 +257,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         response = await self._request(
             "authn/api/identity/login/",
             method=METH_POST,
-            params={"client_id": CLIENT_ID},
+            params={"client_id": self.client_id},
             headers={
                 "X-CSRF-Token": csrf_token,
                 "Accept": "application/json",
@@ -266,7 +276,7 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
         response = await self._request(
             "authn/identity/finish/",
             method=METH_POST,
-            params={"client_id": CLIENT_ID},
+            params={"client_id": self.client_id},
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
             },
@@ -289,13 +299,13 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             method=METH_POST,
             headers={
                 "X-OIDC": "v1",
-                "X-Region": "NO",  # @TODO: Support multiple regions.
+                "X-Region": self.region.name,
             },
             data={
-                "client_id": CLIENT_ID,
+                "client_id": self.client_id,
                 "grant_type": "authorization_code",
                 "code": code,
-                "redirect_uri": f"pme.podme.{CLIENT_ID}:/login",
+                "redirect_uri": f"pme.podme.{self.client_id}:/login",
                 "code_verifier": code_verifier,
             },
             allow_redirects=False,
@@ -332,14 +342,14 @@ class PodMeDefaultAuthClient(PodMeAuthClient):
             "oauth/token",
             method=METH_POST,
             headers={
-                "Host": "payment.schibsted.no",
+                "Host": self.base_url.host,
                 "Content-Type": "application/x-www-form-urlencoded",
                 "User-Agent": "AccountSDKAndroidWeb/6.4.0 (Linux; Android 15; API 35; Google; sdk_gphone64_arm64)",
                 "X-OIDC": "v1",
-                "X-Region": "NO",  # @TODO: Support multiple regions.
+                "X-Region": self.region.name,
             },
             data={
-                "client_id": CLIENT_ID,
+                "client_id": self.client_id,
                 "grant_type": "refresh_token",
                 "refresh_token": credentials.refresh_token,
             },
