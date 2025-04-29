@@ -42,7 +42,7 @@ If you have any questions or need assistance with the library, you can contact t
 [releases]: https://github.com/bendikrb/podme_api/releases
 [build-shield]: https://github.com/bendikrb/podme_api/actions/workflows/test.yaml/badge.svg
 [build]: https://github.com/bendikrb/podme_api/actions/workflows/test.yaml
-[maintenance-shield]: https://img.shields.io/maintenance/yes/2024.svg
+[maintenance-shield]: https://img.shields.io/maintenance/yes/2025.svg
 [py-versions-shield]: https://img.shields.io/pypi/pyversions/podme-api
 [py-versions]: https://pypi.org/project/podme-api/
 [codecov-shield]: https://codecov.io/gh/bendikrb/podme_api/graph/badge.svg?token=IXLJ3WR4ES
