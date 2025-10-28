@@ -17,7 +17,7 @@ PODME_AUTH_BASE_URL = {
 }
 PODME_AUTH_CLIENT_ID = {
     PodMeRegion.NO: "62557b19f552881812b7431c",
-    PodMeRegion.SE: "66fd141b3f97a8558ace8ab9",  # TODO: Check
+    PodMeRegion.SE: "62557c04db3a6b00de7d7a53",
     PodMeRegion.FI: "62557b19f552881812b7431c",  # TODO: Check
     PodMeRegion.DK: "62557b19f552881812b7431c",  # TODO: Check
 }
