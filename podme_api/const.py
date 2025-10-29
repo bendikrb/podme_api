@@ -13,13 +13,11 @@ PODME_AUTH_BASE_URL = {
     PodMeRegion.NO: "https://payment.schibsted.no",
     PodMeRegion.SE: "https://login.schibsted.com",
     PodMeRegion.FI: "https://login.schibsted.fi",
-    PodMeRegion.DK: "https://login.schibsted.dk",
 }
 PODME_AUTH_CLIENT_ID = {
     PodMeRegion.NO: "62557b19f552881812b7431c",
     PodMeRegion.SE: "62557c04db3a6b00de7d7a53",
-    PodMeRegion.FI: "62557b19f552881812b7431c",  # TODO: Check
-    PodMeRegion.DK: "62557b19f552881812b7431c",  # TODO: Check
+    PodMeRegion.FI: "625546a9db3a6b00de7d7a52",
 }
 
 DEFAULT_REQUEST_TIMEOUT = 15

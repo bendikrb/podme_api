@@ -55,7 +55,6 @@ class PodMeRegion(IntEnum):
     SE = 1
     NO = 2
     FI = 3
-    DK = 4
 
     def __repr__(self):
         return self.name
