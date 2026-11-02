@@ -11,6 +11,7 @@ from aresponses.main import Route
 
 # noinspection PyProtectedMember
 from aresponses.utils import ANY, _text_matches_pattern
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 import orjson
 from yarl import URL
 
@@ -43,6 +44,14 @@ def load_fixture_json(name: str):
     """Load a fixture as JSON."""
     data = load_fixture(name)
     return orjson.loads(data)
+
+
+def encrypt_aes128(data: bytes, key: bytes, iv: bytes) -> bytes:
+    """Encrypt data the way HLS AES-128 segments are encrypted (PKCS7 padded)."""
+    padding = 16 - len(data) % 16
+    padded = data + bytes([padding]) * padding
+    encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+    return encryptor.update(padded) + encryptor.finalize()
 
 
 class CustomRoute(Route):  # pragma: no cover

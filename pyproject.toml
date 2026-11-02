@@ -27,6 +27,7 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
+cryptography = "^46.0.0"
 rich = "^13.9.2"
 platformdirs = "^4.3.7"
 pathlib = "^1.0.1"
