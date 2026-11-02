@@ -23,6 +23,7 @@ from podme_api.exceptions import (
     PodMeApiConnectionTimeoutError,
     PodMeApiDownloadError,
     PodMeApiError,
+    PodMeApiHlsError,
     PodMeApiNotFoundError,
     PodMeApiPlaylistUrlNotFoundError,
     PodMeApiRateLimitError,
@@ -42,6 +43,7 @@ from podme_api.models import (
 
 from .helpers import (
     CustomRoute,
+    encrypt_aes128,
     load_fixture_json,
     setup_auth_mocks,
     setup_stream_mocks,
@@ -673,6 +675,258 @@ async def test_download_episode_files_stream_url_get_error(aresponses: Responses
             on_finished = Mock()
             with pytest.raises(PodMeApiDownloadError):
                 await client.download_files(download_infos, on_progress, on_finished)
+
+
+HLS_HOST = "hls.podme.test"
+HLS_PATH = "/video/episode"
+HLS_MASTER_URL = f"https://{HLS_HOST}{HLS_PATH}/master.m3u8"
+HLS_AUDIO_URL = f"https://{HLS_HOST}{HLS_PATH}/audio.m3u8"
+
+
+def setup_video_hls_mocks(
+    aresponses: ResponsesMockServer,
+    *,
+    include_audio_variant: bool = True,
+    key_length: int = 16,
+    master_status: int = 200,
+):
+    """Mock a PodMe video episode: a master playlist and its encrypted audio."""
+    key = bytes(range(key_length))
+    media_sequence = 9
+    plaintext_segments = [b"first audio segment" * 4, b"second audio segment" * 6]
+    encrypted_segments = [
+        encrypt_aes128(plaintext, key, (media_sequence + index).to_bytes(16, "big"))
+        for index, plaintext in enumerate(plaintext_segments)
+    ]
+    init_segment = b"fmp4-init-segment"
+
+    if include_audio_variant:
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:7\n"
+            '#EXT-X-STREAM-INF:BANDWIDTH=2050000,CODECS="avc1.4d401f,mp4a.40.2",'
+            "RESOLUTION=1280x720\n"
+            "video_720.m3u8\n"
+            '#EXT-X-STREAM-INF:BANDWIDTH=140800,CODECS="mp4a.40.2"\n'
+            "audio.m3u8\n"
+        )
+        audio_playlist = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:7\n"
+            "#EXT-X-TARGETDURATION:4\n"
+            f"#EXT-X-MEDIA-SEQUENCE:{media_sequence}\n"
+            "#EXT-X-PLAYLIST-TYPE:VOD\n"
+            '#EXT-X-MAP:URI="init.mp4"\n'
+            '#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n'
+            "#EXTINF:3.2,\n"
+            "segment_0.mp4\n"
+            "#EXTINF:3.2,\n"
+            "segment_1.mp4\n"
+            "#EXT-X-ENDLIST\n"
+        )
+    else:
+        master = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2050000,CODECS="avc1.4d401f"\nvideo_720.m3u8\n'
+        audio_playlist = ""
+
+    aresponses.add(
+        HLS_HOST,
+        f"{HLS_PATH}/master.m3u8",
+        "GET",
+        Response(body=master, status=master_status),
+        repeat=float("inf"),
+    )
+    if not include_audio_variant:
+        return {
+            "expected": init_segment,
+            "audio_url": HLS_AUDIO_URL,
+            "plaintext_segments": plaintext_segments,
+        }
+
+    aresponses.add(
+        HLS_HOST,
+        f"{HLS_PATH}/audio.m3u8",
+        "GET",
+        Response(body=audio_playlist),
+        repeat=float("inf"),
+    )
+    aresponses.add(HLS_HOST, f"{HLS_PATH}/key.bin", "GET", Response(body=key), repeat=float("inf"))
+    aresponses.add(HLS_HOST, f"{HLS_PATH}/init.mp4", "GET", Response(body=init_segment), repeat=float("inf"))
+    for index, encrypted in enumerate(encrypted_segments):
+        aresponses.add(HLS_HOST, f"{HLS_PATH}/segment_{index}.mp4", "GET", Response(body=encrypted))
+
+    return {
+        "expected": init_segment + b"".join(plaintext_segments),
+        "audio_url": HLS_AUDIO_URL,
+        "plaintext_segments": plaintext_segments,
+    }
+
+
+async def test_download_hls_episode_audio(aresponses: ResponsesMockServer, podme_client):
+    mocks = setup_video_hls_mocks(aresponses)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "episode.mp3"
+            on_progress = Mock()
+            on_finished = Mock()
+
+            await client.download_file(HLS_MASTER_URL, target, on_progress, on_finished, transcode=False)
+
+            assert target.read_bytes() == mocks["expected"]
+            assert not target.with_name(f"{target.name}.hls.part").exists()
+
+            progress = [
+                (args.args[2], args.args[3])
+                for args in on_progress.call_args_list
+                if args.args[0] is PodMeDownloadProgressTask.DOWNLOAD_FILE
+            ]
+            assert progress == [(0, 2), (1, 2), (2, 2)]
+            on_finished.assert_called_once_with(HLS_MASTER_URL, str(target))
+
+
+async def test_download_hls_episode_transcodes_to_mp3(
+    aresponses: ResponsesMockServer, podme_client, monkeypatch
+):
+    mocks = setup_video_hls_mocks(aresponses)
+    recorded = {}
+
+    class FakeFFmpeg:
+        def option(self, *_args: object) -> FakeFFmpeg:
+            return self
+
+        def input(self, path: Path | str) -> FakeFFmpeg:
+            recorded["input"] = Path(path)
+            return self
+
+        def output(self, path: Path | str, options: dict[str, object]) -> FakeFFmpeg:
+            recorded["output"] = Path(path)
+            recorded["options"] = options
+            return self
+
+        async def execute(self):
+            recorded["output"].write_bytes(recorded["input"].read_bytes())
+            return b""
+
+    monkeypatch.setattr("podme_api.client.FFmpeg", FakeFFmpeg)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "episode.mp3"
+            on_progress = Mock()
+
+            await client.download_file(HLS_MASTER_URL, target, on_progress, transcode=True)
+
+            assert target.read_bytes() == mocks["expected"]
+            assert recorded["options"] == {
+                "vn": None,
+                "map_metadata": "-1",
+                "c:a": "libmp3lame",
+                "q:a": "2",
+            }
+            assert any(
+                args.args[0] is PodMeDownloadProgressTask.TRANSCODE_FILE
+                for args in on_progress.call_args_list
+            )
+
+
+async def test_download_hls_episode_ffmpeg_missing(
+    aresponses: ResponsesMockServer, podme_client, monkeypatch
+):
+    setup_video_hls_mocks(aresponses)
+
+    class MissingFFmpeg:
+        def option(self, *_args: object) -> MissingFFmpeg:
+            return self
+
+        def input(self, _path: Path | str) -> MissingFFmpeg:
+            return self
+
+        def output(self, _path: Path | str, _options: dict[str, object]) -> MissingFFmpeg:
+            return self
+
+        async def execute(self):
+            raise FileNotFoundError("ffmpeg")
+
+    monkeypatch.setattr("podme_api.client.FFmpeg", MissingFFmpeg)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "episode.mp3"
+
+            with pytest.raises(PodMeApiHlsError, match="ffmpeg is required"):
+                await client.download_file(HLS_MASTER_URL, target)
+
+            assert not target.exists()
+            assert not target.with_name(f"{target.name}.hls.part").exists()
+
+
+async def test_download_hls_episode_no_audio_variant(aresponses: ResponsesMockServer, podme_client):
+    setup_video_hls_mocks(aresponses, include_audio_variant=False)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "episode.mp3"
+
+            with pytest.raises(PodMeApiPlaylistUrlNotFoundError):
+                await client.download_file(HLS_MASTER_URL, target, transcode=False)
+
+            assert not target.exists()
+            assert not target.with_name(f"{target.name}.hls.part").exists()
+
+
+async def test_download_hls_episode_invalid_key(aresponses: ResponsesMockServer, podme_client):
+    setup_video_hls_mocks(aresponses, key_length=32)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "episode.mp3"
+
+            with pytest.raises(PodMeApiHlsError, match="expected 16"):
+                await client.download_file(HLS_MASTER_URL, target, transcode=False)
+
+
+async def test_resolve_stream_url_hls_master(aresponses: ResponsesMockServer, podme_client):
+    setup_video_hls_mocks(aresponses)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        info = await client.resolve_stream_url(HLS_MASTER_URL)
+
+        assert str(info["url"]) == HLS_AUDIO_URL
+        assert info["content_type"] == "application/vnd.apple.mpegurl"
+
+
+async def test_resolve_stream_url_hls_media_playlist(aresponses: ResponsesMockServer, podme_client):
+    mocks = setup_video_hls_mocks(aresponses)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        info = await client.resolve_stream_url(mocks["audio_url"])
+
+        assert str(info["url"]) == HLS_AUDIO_URL
+
+
+async def test_resolve_stream_url_hls_no_audio_variant(aresponses: ResponsesMockServer, podme_client):
+    setup_video_hls_mocks(aresponses, include_audio_variant=False)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with pytest.raises(PodMeApiPlaylistUrlNotFoundError):
+            await client.resolve_stream_url(HLS_MASTER_URL)
+
+
+async def test_resolve_stream_url_hls_http_error(aresponses: ResponsesMockServer, podme_client):
+    setup_video_hls_mocks(aresponses, master_status=500)
+
+    async with podme_client() as client:
+        client: PodMeClient
+        with pytest.raises(PodMeApiStreamUrlError):
+            await client.resolve_stream_url(HLS_MASTER_URL)
 
 
 async def test_transcode_file_error(podme_client):

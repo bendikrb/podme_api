@@ -33,6 +33,10 @@ class PodMeApiDownloadError(PodMeApiError):
     """PodMe download exception."""
 
 
+class PodMeApiHlsError(PodMeApiDownloadError):
+    """PodMe HLS download exception."""
+
+
 class PodMeApiStreamUrlError(PodMeApiDownloadError):
     """PodMe stream_url exception."""
 

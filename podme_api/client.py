@@ -33,14 +33,14 @@ from podme_api.exceptions import (
     PodMeApiConnectionTimeoutError,
     PodMeApiDownloadError,
     PodMeApiError,
+    PodMeApiHlsError,
     PodMeApiNotFoundError,
-    PodMeApiPlaylistUrlNotFoundError,
     PodMeApiRateLimitError,
     PodMeApiStreamUrlError,
-    PodMeApiStreamUrlNotFoundError,
     PodMeApiUnauthorizedError,
 )
 from podme_api.helpers import async_cache, fetch_with_redirects, get_total_seconds
+from podme_api.hls import iter_hls_audio, select_audio_playlist_url
 from podme_api.models import (
     PodMeCategory,
     PodMeCategoryPage,
@@ -436,12 +436,18 @@ class PodMeClient:
     ) -> None:
         """Download a file from a given URL and save it to the specified path.
 
+        HLS (``.m3u8``) URLs are downloaded as audio: the audio-only variant is
+        resolved, its encrypted media segments are fetched and decrypted, and
+        the result is transcoded to the requested container (MP3 for ``.mp3``
+        paths).
+
         Args:
             download_url (URL | str): The URL of the file to download.
             path (PathLike | str): The local path where the file will be saved.
             on_progress (Callable[[PodMeDownloadProgressTask, str, int, int], None], optional):
                 A callback function to report download progress. It should accept
                 the download URL/path, current and total as arguments (current==total means 100%).
+                For HLS downloads, current and total are segment counts.
             on_finished (Callable[[str, str], None], optional):
                 A callback function to be called when the download is complete.
                 It should accept the download URL and save path as arguments.
@@ -457,6 +463,10 @@ class PodMeClient:
             on_progress = lambda task, url, current, total: None  # noqa: E731, ARG005
         if on_finished is None:
             on_finished = lambda url, _path: None  # noqa: E731, ARG005
+
+        if download_url.path.lower().endswith(".m3u8"):
+            await self._download_hls_file(download_url, save_path, on_progress, on_finished, transcode)
+            return
 
         self._ensure_session()
 
@@ -493,6 +503,73 @@ class PodMeClient:
             on_progress(PodMeDownloadProgressTask.TRANSCODE_FILE, str(download_url), 100, 100)
 
         on_finished(str(download_url), str(save_path))
+
+    async def _download_hls_file(
+        self,
+        download_url: URL,
+        save_path: Path,
+        on_progress: Callable[[PodMeDownloadProgressTask, str, int, int], None],
+        on_finished: Callable[[str, str], None],
+        transcode: bool,
+    ) -> None:
+        """Download the audio of an HLS episode and save it to ``save_path``."""
+        self._ensure_session()
+        url = str(download_url)
+        temp_fmp4 = save_path.with_name(f"{save_path.name}.hls.part")
+        output_suffix = save_path.suffix.lower()
+        if output_suffix not in {".m4a", ".mp4"}:
+            output_suffix = ".mp3"
+        temp_output = save_path.with_name(f"{save_path.name}.hls.tmp{output_suffix}")
+
+        try:
+            _LOGGER.debug("Starting HLS download of <%s>", download_url)
+
+            def report_progress(downloaded: int, total: int) -> None:
+                on_progress(PodMeDownloadProgressTask.DOWNLOAD_FILE, url, downloaded, total)
+
+            async with aiofiles.open(temp_fmp4, mode="wb") as f:
+                async for chunk in iter_hls_audio(
+                    self.session,
+                    url,
+                    headers={"User-Agent": PODME_API_USER_AGENT},
+                    on_progress=report_progress,
+                ):
+                    await f.write(chunk)
+
+            if transcode:
+                on_progress(PodMeDownloadProgressTask.TRANSCODE_FILE, url, 0, 100)
+                await self._transcode_hls_file(temp_fmp4, save_path, temp_output)
+                on_progress(PodMeDownloadProgressTask.TRANSCODE_FILE, url, 100, 100)
+            else:
+                await aiofiles.os.replace(temp_fmp4, save_path)
+        finally:
+            temp_fmp4.unlink(missing_ok=True)
+            temp_output.unlink(missing_ok=True)
+
+        _LOGGER.debug("Finished HLS download of <%s> to <%s>", download_url, save_path)
+        on_finished(url, str(save_path))
+
+    async def _transcode_hls_file(
+        self,
+        input_file: Path,
+        output_file: Path,
+        temp_output: Path,
+    ) -> None:
+        """Transcode downloaded HLS audio to the requested container."""
+        if output_file.suffix.lower() in {".m4a", ".mp4"}:
+            options = {"vn": None, "map_metadata": "-1", "c:a": "copy"}
+        else:
+            options = {"vn": None, "map_metadata": "-1", "c:a": "libmp3lame", "q:a": "2"}
+
+        try:
+            ffmpeg = FFmpeg().option("y").input(input_file).output(temp_output, options)
+            await ffmpeg.execute()
+        except FileNotFoundError as err:
+            raise PodMeApiHlsError("ffmpeg is required to download HLS episodes") from err
+        except FFmpegError as err:
+            raise PodMeApiHlsError(f"ffmpeg failed to transcode HLS episode: {err}") from err
+
+        await aiofiles.os.replace(temp_output, output_file)
 
     async def download_files(
         self,
@@ -1112,6 +1189,9 @@ class PodMeClient:
     async def resolve_stream_url(self, stream_url: URL | str) -> FetchedFileInfo:
         """Check if a stream URL is downloadable.
 
+        For HLS URLs, the audio media playlist URL is returned; pass it to
+        :meth:`download_file` to download the decrypted audio.
+
         Args:
             stream_url (URL | str): The URL to check.
 
@@ -1128,13 +1208,18 @@ class PodMeClient:
         return await self.check_stream_url(stream_url)
 
     async def _resolve_m3u8_url(self, master_url: URL | str) -> FetchedFileInfo:
-        """Resolve a master.m3u8 URL to an audio segment URL.
+        """Resolve an HLS URL to its audio media playlist URL.
 
         Args:
-            master_url (URL | str): The URL to check.
+            master_url (URL | str): The media or master playlist URL.
 
         Returns:
-            The content length and content type if the URL is downloadable, None otherwise.
+            The audio media playlist URL and its content type.
+
+        Raises:
+            PodMeApiPlaylistUrlNotFoundError: If a master playlist has no
+                audio-only variant.
+            PodMeApiStreamUrlError: If the playlist cannot be fetched.
 
         """
         self._ensure_session()
@@ -1142,39 +1227,24 @@ class PodMeClient:
 
         _LOGGER.debug("Resolving m3u8 URL: <%s>", master_url)
 
-        # Fetch master.m3u8
-        response = await self.session.get(master_url)
-        master_content = await response.text()
+        try:
+            async with self.session.get(
+                master_url,
+                headers={"User-Agent": PODME_API_USER_AGENT},
+            ) as response:
+                response.raise_for_status()
+                master_content = await response.text()
+        except ClientError as err:
+            raise PodMeApiStreamUrlError(f"Could not fetch playlist <{master_url}>") from err
 
-        # Parse master.m3u8 to get the audio playlist URL (first match only).
-        audio_playlist_url: URL | None = None
-        for line in master_content.splitlines():
-            if ".m3u8" in line:
-                audio_playlist_url = master_url.join(URL(line.strip()))
-                break
+        audio_playlist_url = select_audio_playlist_url(str(master_url), master_content)
+        _LOGGER.debug("Resolved m3u8 URL to audio playlist: <%s>", audio_playlist_url)
 
-        if audio_playlist_url is None:
-            raise PodMeApiPlaylistUrlNotFoundError(f"Could not find audio playlist URL in <{master_url}>")
-
-        # Fetch audio playlist
-        response = await self.session.get(audio_playlist_url)
-        audio_playlist_content = await response.text()
-
-        # Parse audio playlist to get the audio segment URL
-        audio_segment_url = None
-        for line in audio_playlist_content.splitlines():
-            if line.startswith("#"):
-                continue
-            if "mp4" in line:
-                audio_segment_url = audio_playlist_url.join(URL(line.strip())).with_query(None)
-                break
-
-        if not audio_segment_url:
-            raise PodMeApiStreamUrlNotFoundError(
-                f"Could not find audio segment URL in audio playlist: <{audio_playlist_url}>"
-            )
-
-        return await self.check_stream_url(audio_segment_url)
+        return {
+            "content_length": 0,
+            "content_type": "application/vnd.apple.mpegurl",
+            "url": URL(audio_playlist_url, encoded=True),
+        }
 
     @staticmethod
     async def _run_concurrent(
